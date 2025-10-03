@@ -40,6 +40,7 @@ const BASIC_PRESETS = [
     { id: 'hamurabi.bas', name: 'Hammurabi' },
     { id: 'wumpus.bas', name: 'Hunt The Wumpus' },
     { id: 'startrader.bas', name: 'Star Trader' },
+    { id: 'startrek.bas', name: 'Star Trek' },
     { id: 'haunted.bas', name: 'Haunted House' },
 ];
 class BASICPlatform {
