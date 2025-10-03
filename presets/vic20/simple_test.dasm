@@ -1,0 +1,14 @@
+        processor 6502
+        org $1001
+        .word basic
+        .word 0
+basic:
+        .word 0
+start:
+        ; Set border color to white (should be visible)
+        lda #$01
+        sta $900F  ; Border color register
+        
+        ; Simple loop to keep program running
+loop:
+        jmp loop 

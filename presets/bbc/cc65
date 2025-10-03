@@ -1,0 +1,38 @@
+# BBC Micro cc65 configuration
+# This file configures cc65 to compile for BBC Micro (6502)
+# Using working cc65 installation at /Users/chrisg/cc65
+
+# Compiler path
+CC65_PATH = /Users/chrisg/cc65
+
+# Compiler flags
+CFLAGS = -t bbc -D __BBC__ -D __6502__ -T -g -Oirs -Cl -W -pointer-sign,-no-effect
+
+# Linker configuration
+LDFLAGS = -C $(CC65_PATH)/cfg/bbc.cfg -L $(CC65_PATH)/lib
+
+# Target-specific defines
+DEFINES = -D __BBC__ -D __6502__ -D __8BITWORKSHOP__
+
+# Include paths
+INCLUDES = -I $(CC65_PATH)/include -I .
+
+# Output format
+OUTPUT_FORMAT = binary
+
+# Memory layout for BBC Micro
+# 0x0000-0x00FF: Zero page
+# 0x0100-0x01FF: Stack
+# 0x0200-0x02FF: System variables
+# 0x0300-0x7FFF: Screen memory
+# 0x8000-0xBFFF: Program space
+# 0xC000-0xFFFF: OS ROM
+
+# Entry point
+ENTRY_POINT = 0x8000
+
+# Default load address
+LOAD_ADDRESS = 0x8000
+
+# Compilation command
+COMPILE_CMD = $(CC65_PATH)/bin/cl65 $(CFLAGS) $(DEFINES) $(INCLUDES) $(LDFLAGS) -o %O %I 

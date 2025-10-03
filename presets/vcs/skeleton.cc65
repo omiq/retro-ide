@@ -1,0 +1,68 @@
+
+/*
+See the "VCSLib Demo" example for more features.
+*/
+
+//#resource "vcslib/vcs-ca65.inc"
+//#resource "vcslib/kernel.inc"
+
+//#link "vcslib/vcslib.ca65"
+//#link "vcslib/frameloop.c"
+//#link "vcslib/mapper_3e.ca65"
+
+#include <peekpoke.h>
+#include "vcslib/bcd.h"
+#include "vcslib/vcslib.h"
+
+#pragma wrapped-call (push, bankselect, bank)
+#pragma code-name (push, "ROM0")
+
+void init(void) {
+  // init code here
+}
+
+void my_preframe(void) {
+  // stuff that happens before the frame is drawn
+    TIA.colubk = 0x00;
+}
+
+void my_kernel(void) {
+  byte i;
+  for (i=0; i<190; i++) {
+    do_wsync();
+    TIA.colubk = i;
+  }
+}
+
+void my_postframe(void) {
+  // stuff that happens after the frame is drawn
+}
+
+void kernel_loop() {
+  while (1) {
+    kernel_1();
+    my_preframe();
+    kernel_2();
+    my_kernel();
+    kernel_3();
+    my_postframe();
+    kernel_4();
+  }
+}
+
+#pragma code-name (pop)
+#pragma wrapped-call (pop)
+
+/*
+The main() function is called at startup.
+It resides in the shared ROM area (PERM).
+*/
+void main(void) {
+  
+  // initialization
+  init();
+  
+  // main kernel loop
+  kernel_loop();
+}
+

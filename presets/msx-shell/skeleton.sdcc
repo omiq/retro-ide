@@ -1,0 +1,9 @@
+; MSX-Shell SDCC Skeleton
+; This file provides the basic structure for MSX C programs
+
+#include "msxbios.h"
+
+int main() {
+    // Your code here
+    return 0;
+}

@@ -1,0 +1,33 @@
+        processor 6502
+        org $1001
+        
+        ; BASIC header
+        .word basic
+        .word 0
+basic:
+        .word 0
+        
+start:
+        ; Initialize color counter
+        ldx #$00
+        
+color_loop:
+        ; Set border color
+        stx $900F  ; Border color register
+        
+        ; Simple delay loop
+        ldy #$00
+delay1:
+        ldx #$00
+delay2:
+        dex
+        bne delay2
+        dey
+        bne delay1
+        
+        ; Next color
+        inx
+        cpx #$10  ; Cycle through 16 colors
+        bne color_loop
+        ldx #$00  ; Reset to first color
+        jmp color_loop 

@@ -1,0 +1,1606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BBC Micro Emulator (Iframe)</title>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+            overflow: hidden;
+        }
+        
+        #status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        
+        #canvas-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+            position: relative;
+        }
+        
+        /* Drag and drop styling */
+        #canvas-container.drag-over {
+            background-color: rgba(0, 123, 255, 0.2);
+            border: 3px dashed #007bff;
+        }
+        
+        .drag-drop-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 1000;
+            display: none;
+            pointer-events: none;
+        }
+        
+        #canvas-container.drag-over .drag-drop-overlay {
+            display: block;
+        }
+        
+        /* Add a full-screen drag drop area that sits on top */
+        .drag-drop-fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 123, 255, 0.3);
+            border: 3px dashed #007bff;
+            z-index: 9999;
+            display: none;
+            pointer-events: none;
+        }
+        
+        .drag-drop-fullscreen.active {
+            display: block;
+            pointer-events: auto;
+        }
+        
+        canvas {
+            border: 2px solid #333;
+            background-color: #000;
+        }
+        
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-size: 18px;
+        }
+        
+        iframe {
+            outline: none;
+            border: none;
+        }
+        
+        iframe:focus {
+            outline: none;
+        }
+        
+        /* Suppress jsbeeb audio messages and other distracting elements */
+        iframe[src*="jsbeeb"] {
+            /* This helps suppress audio-related messages */
+        }
+        
+        /* Hide any yellow warning messages that might appear */
+        .warning, .alert, .notice {
+            display: none !important;
+        }
+        
+        /* Target specific jsbeeb audio messages */
+        [style*="background-color: yellow"], 
+        [style*="background-color: #ffff00"],
+        [style*="color: yellow"],
+        [style*="color: #ffff00"] {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="status">Loading BBC Micro emulator...</div>
+    <div id="download-area" style="position: fixed; top: 50px; left: 10px; z-index: 1001; display: none;">
+        <a id="download-link" href="#" download="PROGRAM.ssd" style="display: block; background-color: #007bff; color: white; padding: 10px; text-decoration: none; border-radius: 5px; margin: 5px 0;">Download SSD file for testing</a>
+    </div>
+    <div id="canvas-container">
+        <div class="loading">Loading jsbeeb emulator...</div>
+        <div class="drag-drop-overlay">
+            <h3>Drop SSD File Here</h3>
+            <p>Drag and drop a BBC Micro SSD file to load it into the emulator</p>
+        </div>
+    </div>
+    
+    <!-- Full-screen drag drop area -->
+    <div id="drag-drop-fullscreen" class="drag-drop-fullscreen">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white; background-color: rgba(0, 0, 0, 0.8); padding: 30px; border-radius: 15px;">
+            <h2>Drop SSD File Here</h2>
+            <p>Drag and drop a BBC Micro SSD file to load it into the emulator</p>
+        </div>
+    </div>
+    
+
+
+    <script>
+            // Global variables
+    let emulatorReady = false;
+    let lastCompiledProgram = null;
+    let canvas = null;
+    let discLoaded = false; // Flag to prevent infinite reload loop
+    let currentIframe = null; // Track the current iframe for reloading
+    let isReloading = false; // Flag to prevent infinite reload loops
+    let discCounter = 0; // Counter for unique disc names
+    let isUpdatingDisc = false; // Flag to prevent disc update loops
+    let lastProgramHash = null; // Hash of the last loaded program to prevent duplicate loads
+    let resetSupported = false;
+    let pauseResumeSupported = false;
+        
+        // Drag and drop functionality
+        function setupDragAndDrop() {
+            console.log('BBC iframe: Setting up drag and drop...');
+            
+            const canvasContainer = document.getElementById('canvas-container');
+            const fullscreenOverlay = document.getElementById('drag-drop-fullscreen');
+            
+            console.log('BBC iframe: Canvas container found:', !!canvasContainer);
+            console.log('BBC iframe: Fullscreen overlay found:', !!fullscreenOverlay);
+            
+            // Prevent default drag behaviors on the entire document
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                document.addEventListener(eventName, preventDefaults, false);
+                document.body.addEventListener(eventName, preventDefaults, false);
+                console.log('BBC iframe: Added', eventName, 'listener to document and body');
+            });
+            
+            // Set up drag and drop on the container
+            ['dragenter', 'dragover'].forEach(eventName => {
+                canvasContainer.addEventListener(eventName, highlight, false);
+                console.log('BBC iframe: Added', eventName, 'listener to container');
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                canvasContainer.addEventListener(eventName, unhighlight, false);
+                console.log('BBC iframe: Added', eventName, 'listener to container');
+            });
+            
+            // Handle dropped files
+            canvasContainer.addEventListener('drop', handleDrop, false);
+            console.log('BBC iframe: Added drop handler to container');
+            
+            // Also set up drag and drop on the full-screen overlay
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                fullscreenOverlay.addEventListener(eventName, preventDefaults, false);
+                console.log('BBC iframe: Added', eventName, 'listener to fullscreen overlay');
+            });
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                fullscreenOverlay.addEventListener(eventName, highlight, false);
+                console.log('BBC iframe: Added', eventName, 'listener to fullscreen overlay');
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                fullscreenOverlay.addEventListener(eventName, unhighlight, false);
+                console.log('BBC iframe: Added', eventName, 'listener to fullscreen overlay');
+            });
+            
+            fullscreenOverlay.addEventListener('drop', handleDrop, false);
+            console.log('BBC iframe: Added drop handler to fullscreen overlay');
+            
+            // Also set up drag and drop on the iframe when it's added
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    mutation.addedNodes.forEach(function(node) {
+                        if (node.tagName === 'IFRAME') {
+                            console.log('BBC iframe: IFRAME detected, setting up drag and drop on iframe');
+                            
+                            // Set up drag and drop directly on the iframe
+                            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                                node.addEventListener(eventName, preventDefaults, false);
+                                console.log('BBC iframe: Added', eventName, 'listener to iframe');
+                            });
+                            
+                            ['dragenter', 'dragover'].forEach(eventName => {
+                                node.addEventListener(eventName, highlight, false);
+                                console.log('BBC iframe: Added', eventName, 'listener to iframe');
+                            });
+                            
+                            ['dragleave', 'drop'].forEach(eventName => {
+                                node.addEventListener(eventName, unhighlight, false);
+                                console.log('BBC iframe: Added', eventName, 'listener to iframe');
+                            });
+                            
+                            node.addEventListener('drop', handleDrop, false);
+                            console.log('BBC iframe: Added drop handler to iframe');
+                        }
+                    });
+                });
+            });
+            
+            observer.observe(canvasContainer, {
+                childList: true,
+                subtree: true
+            });
+            
+            console.log('BBC iframe: Drag and drop setup complete');
+        
+
+        
+        // Simple drag and drop test - this should definitely work
+        document.addEventListener('dragover', function(e) {
+            console.log('BBC iframe: Document dragover event');
+            e.preventDefault();
+        });
+        
+        document.addEventListener('drop', function(e) {
+            console.log('BBC iframe: Document drop event');
+            e.preventDefault();
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                console.log('BBC iframe: File dropped on document:', files[0].name);
+                if (files[0].name.toLowerCase().endsWith('.ssd')) {
+                    alert('SSD file loading disabled - use compiled programs instead');
+                } else {
+                    alert('Please select an SSD file (.ssd)');
+                }
+            }
+        });
+        }
+        
+        function preventDefaults(e) {
+            console.log('BBC iframe: preventDefaults called for', e.type);
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        function highlight(e) {
+            console.log('BBC iframe: highlight called for', e.type);
+            document.getElementById('canvas-container').classList.add('drag-over');
+            document.getElementById('drag-drop-fullscreen').classList.add('active');
+        }
+        
+        function unhighlight(e) {
+            console.log('BBC iframe: unhighlight called for', e.type);
+            document.getElementById('canvas-container').classList.remove('drag-over');
+            document.getElementById('drag-drop-fullscreen').classList.remove('active');
+        }
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0) {
+                const file = files[0];
+                console.log('BBC iframe: File dropped:', file.name, file.type, file.size);
+                
+                // Check if it's an SSD file
+                if (file.name.toLowerCase().endsWith('.ssd') || file.type === 'application/octet-stream') {
+                    updateStatus('SSD file loading disabled - use compiled programs instead');
+                } else {
+                    updateStatus('Please drop an SSD file (.ssd)');
+                }
+            }
+            
+            // Always unhighlight after drop
+            unhighlight(e);
+        }
+        
+
+        
+        // Status update function
+        function updateStatus(message) {
+            const status = document.getElementById('status');
+            if (status) {
+                status.textContent = message;
+                console.log("BBC iframe:", message);
+            }
+        }
+        
+        // Function to test if reset/pause/resume functionality actually works
+        function testEmulatorCapabilities() {
+            console.log("BBC iframe: Testing emulator capabilities...");
+            
+            const iframe = document.querySelector('iframe');
+            if (!iframe || !iframe.contentWindow) {
+                console.log("BBC iframe: No iframe found for capability test");
+                resetSupported = false;
+                pauseResumeSupported = false;
+                sendCapabilitiesToParent();
+                return;
+            }
+            
+            const jsbeebWindow = iframe.contentWindow;
+            
+            // Test reset capability
+            let resetWorks = false;
+            if (jsbeebWindow.processor && typeof jsbeebWindow.processor.reset === 'function') {
+                try {
+                    // Test if reset function exists and can be called
+                    console.log("BBC iframe: Reset function found, testing...");
+                    resetWorks = true;
+                } catch (e) {
+                    console.log("BBC iframe: Reset function test failed:", e);
+                    resetWorks = false;
+                }
+            } else {
+                console.log("BBC iframe: No reset function found on processor");
+                resetWorks = false;
+            }
+            
+            // Test pause/resume capability
+            let pauseResumeWorks = false;
+            if (jsbeebWindow.processor && 
+                typeof jsbeebWindow.processor.pause === 'function' && 
+                typeof jsbeebWindow.processor.resume === 'function') {
+                try {
+                    // Test if pause/resume functions exist and can be called
+                    console.log("BBC iframe: Pause/resume functions found, testing...");
+                    pauseResumeWorks = true;
+                } catch (e) {
+                    console.log("BBC iframe: Pause/resume function test failed:", e);
+                    pauseResumeWorks = false;
+                }
+            } else {
+                console.log("BBC iframe: No pause/resume functions found on processor");
+                pauseResumeWorks = false;
+            }
+            
+            // Set global capability flags
+            resetSupported = resetWorks;
+            pauseResumeSupported = pauseResumeWorks;
+            
+            console.log("BBC iframe: Capability test results:");
+            console.log("  - Reset supported:", resetSupported);
+            console.log("  - Pause/Resume supported:", pauseResumeSupported);
+            
+            // Send capabilities to parent window
+            sendCapabilitiesToParent();
+        }
+        
+        // Send capability information to parent window
+        function sendCapabilitiesToParent() {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'emulator_capabilities',
+                    capabilities: {
+                        reset: resetSupported,
+                        pause: pauseResumeSupported,
+                        resume: pauseResumeSupported
+                    }
+                }, '*');
+                console.log("BBC iframe: Sent capabilities to parent:", {
+                    reset: resetSupported,
+                    pause: pauseResumeSupported,
+                    resume: pauseResumeSupported
+                });
+            }
+        }
+        
+        // Function to load any queued program when emulator becomes ready
+        function loadQueuedProgram() {
+            if (lastCompiledProgram && emulatorReady) {
+                console.log("BBC iframe: Loading queued program now that emulator is ready");
+                setTimeout(() => loadProgramIntoEmulator(lastCompiledProgram), 500);
+            }
+        }
+        
+        // Constants from the working makedisk.py (available to all functions)
+        const BYTES_PER_SECTOR = 256;
+        const SECTORS_PER_TRACK = 10;
+        const TRACK_COUNT = 80;
+        const START_SECTOR = 2;
+        
+        // Convert binary data to BBC Micro SSD disc image using exact logic from working Python script
+        function createSSDDiscImage(programData, filename = "PROGRAM") {
+            console.log("BBC iframe: Creating SSD disc using exact Python script logic...");
+            
+            // Create disc image buffer
+            const discSize = TRACK_COUNT * SECTORS_PER_TRACK * BYTES_PER_SECTOR;
+            const discImage = new Uint8Array(discSize);
+            discImage.fill(0);
+            
+            // Create file specification (matching Python script)
+            const fileSpec = {
+                directory: "$",
+                file: "program.bin",
+                name: filename,
+                            load_addr: 0x1900,  // Standard BBC load address
+            exec_addr: 0x1900,  // Standard BBC exec address
+                length: programData.length
+            };
+            
+            // Create catalog entries
+            const catalog = [];
+            
+            // Use program data directly without header (let BBC handle it)
+            const programWithHeader = programData;
+            
+            // Update file spec
+            fileSpec.length = programWithHeader.length;
+            
+            // Add main program file
+            const mainFile = {
+                spec: fileSpec,
+                start_sector: START_SECTOR,
+                content: programWithHeader,
+                length: programWithHeader.length,
+                sectors: Math.floor((programWithHeader.length + BYTES_PER_SECTOR - 1) / BYTES_PER_SECTOR)
+            };
+            catalog.push(mainFile);
+            
+            // Create !BOOT file for auto-boot
+            const bootContent = "*RUN " + filename + "\r";
+            const bootFile = {
+                spec: {
+                    directory: String.fromCharCode(ord("$") | 0x80), // Auto-boot flag
+                    file: "!BOOT",
+                    name: "!BOOT",
+                    load_addr: 0x1900,
+                    exec_addr: 0x1900,
+                    length: bootContent.length
+                },
+                start_sector: START_SECTOR,
+                content: new TextEncoder().encode(bootContent),
+                length: bootContent.length,
+                sectors: Math.floor((bootContent.length + BYTES_PER_SECTOR - 1) / BYTES_PER_SECTOR)
+            };
+            
+            // Insert boot file at beginning and adjust sectors
+            catalog.unshift(bootFile);
+            for (let i = 1; i < catalog.length; i++) {
+                catalog[i].start_sector = bootFile.start_sector + bootFile.sectors;
+            }
+            
+            console.log("BBC iframe: Catalog created:");
+            for (const f of catalog) {
+                console.log("  -", f.spec.name, "sectors:", f.sectors, "start:", f.start_sector, "length:", f.length);
+            }
+            
+            // Write catalog (sectors 0 and 1)
+            writeCatalog(discImage, catalog, "8BITWORKSHOP", "run");
+            
+            // Write files (starting from sector 2)
+            writeFiles(discImage, catalog);
+            
+            console.log("BBC iframe: Successfully created SSD disc image:", discImage.length, "bytes");
+            console.log("  - Files:", catalog.map(f => f.spec.name).join(", "));
+            console.log("  - Boot file:", bootFile.spec.name);
+            console.log("  - Boot content:", JSON.stringify(bootContent));
+            console.log("  - Program with header length:", programWithHeader.length);
+            console.log("  - Program header bytes:", Array.from(programWithHeader.slice(0, 4)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            
+            // Debug: Check first few bytes of the disc image
+            console.log("  - Disc image first 32 bytes:", Array.from(discImage.slice(0, 32)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            console.log("  - Catalogue sector 0:", Array.from(discImage.slice(0, 256)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            console.log("  - Catalogue sector 1:", Array.from(discImage.slice(256, 512)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            
+            return discImage;
+        }
+        
+        // Helper function to get char code (like ord() in Python)
+        function ord(char) {
+            return char.charCodeAt(0);
+        }
+        
+        // Write catalog sectors (exact logic from Python script)
+        function writeCatalog(discImage, catalog, title, opt) {
+            // Sector 00
+            const s00 = new SSDSector(discImage, 0);
+            s00.string(8, title);
+            
+            for (const entry of catalog) {
+                s00.string(7, entry.spec.name, " ");
+                s00.write(1, [ord(entry.spec.directory)]);
+            }
+            s00.close();
+            
+            // Sector 01
+            const s01 = new SSDSector(discImage, 1);
+            s01.string(4, title.substring(8));
+            s01.byte(0);
+            s01.byte(catalog.length * 8);
+            
+            const sectorCount = TRACK_COUNT * SECTORS_PER_TRACK;
+            const bootOpts = {null: 0, "load": 1, "run": 2, "exec": 3};
+            
+            // Set boot option (matching Python logic)
+            let bootOption;
+            if (opt === "run" || opt === "exec") {
+                bootOption = 3; // Use exec mode for auto-boot
+            } else {
+                bootOption = bootOpts[opt] || 0;
+            }
+            
+            s01.bitpairs(0, bootOption, 0, sectorCount >> 8);
+            s01.byte(sectorCount & 0xff);
+            
+            for (const entry of catalog) {
+                s01.word(entry.spec.load_addr);
+                s01.word(entry.spec.exec_addr);
+                s01.word(entry.length);
+                s01.bitpairs(
+                    entry.spec.exec_addr >> 16,
+                    entry.length >> 16,
+                    entry.spec.load_addr >> 16,
+                    entry.start_sector >> 8
+                );
+                s01.byte(entry.start_sector & 0xff);
+            }
+            s01.close();
+        }
+        
+        // Write files to disc (exact logic from Python script)
+        function writeFiles(discImage, catalog) {
+            console.log("BBC iframe: Writing files to disc...");
+            
+            for (const f of catalog) {
+                console.log("  - Writing file:", f.spec.name, "at sector", f.start_sector, "length:", f.content.length);
+                
+                let remainingContent = f.content;
+                let currentSector = f.start_sector;
+                
+                while (remainingContent.length > 0) {
+                    const chunkSize = Math.min(remainingContent.length, 256);
+                    const sector = new SSDSector(discImage, currentSector);
+                    sector.write(chunkSize, remainingContent);
+                    sector.close();
+                    
+                    remainingContent = remainingContent.slice(chunkSize);
+                    currentSector++;
+                }
+            }
+        }
+        
+        // SSD Sector class (exact replica of Python SSDSector)
+        class SSDSector {
+            constructor(discImage, sectorNumber) {
+                this.written = 0;
+                this.discImage = discImage;
+                this.sectorOffset = sectorNumber * 256;
+                console.log("    - Creating sector", sectorNumber, "at offset", this.sectorOffset);
+            }
+            
+            write(num, data) {
+                for (let i = 0; i < num; i++) {
+                    this.discImage[this.sectorOffset + this.written + i] = data[i];
+                }
+                this.written += num;
+                if (this.written > 256) {
+                    throw new Error("Too many bytes in sector");
+                }
+            }
+            
+            byte(byte) {
+                this.write(1, [byte]);
+            }
+            
+            bitpairs(p3, p2, p1, p0) {
+                this.byte((((((p3 << 2) | p2) << 2) | p1) << 2) | p0);
+            }
+            
+            word(word) { // 16 bits
+                this.byte(word & 0xff);
+                this.byte((word >> 8) & 0xff);
+            }
+            
+            string(num, data, pad = "\0") {
+                const chars = data.length;
+                let payload;
+                if (chars > num) {
+                    // Truncate if data is too long
+                    payload = data.substring(0, num);
+                } else {
+                    // Pad if data is too short
+                    const repeatCount = num - chars;
+                    payload = data + (pad.repeat(repeatCount));
+                }
+                this.write(num, new TextEncoder().encode(payload));
+            }
+            
+            close() {
+                const remaining = 256 - this.written;
+                this.write(remaining, new Array(remaining).fill(0));
+            }
+        }
+        
+        // Fallback simple SSD disc creation
+        function createSimpleSSDDisc(programData, filename = "PROGRAM") {
+            const sectorSize = 256;
+            const totalSectors = 80;
+            const discSize = totalSectors * sectorSize;
+            const discImage = new Uint8Array(discSize);
+            discImage.fill(0);
+            
+            // Simple sector-based storage
+            const startSector = 2;
+            const programSectors = Math.ceil(programData.length / sectorSize);
+            
+            for (let sector = 0; sector < programSectors; sector++) {
+                const sectorOffset = (startSector + sector) * sectorSize;
+                const dataOffset = sector * sectorSize;
+                const bytesToCopy = Math.min(sectorSize, programData.length - dataOffset);
+                
+                for (let i = 0; i < bytesToCopy; i++) {
+                    discImage[sectorOffset + i] = programData[dataOffset + i];
+                }
+            }
+            
+            // Simple catalogue
+            const catalogue = new Uint8Array(sectorSize);
+            catalogue[0] = 0x00; catalogue[1] = 0x00; catalogue[2] = 0x00; catalogue[3] = 0x01;
+            
+            const paddedFilename = filename.padEnd(8, ' ').substring(0, 8);
+            for (let i = 0; i < 8; i++) {
+                catalogue[8 + i] = paddedFilename.charCodeAt(i);
+            }
+            
+            catalogue[16] = 0x00; // File status
+            catalogue[17] = 0x00; catalogue[18] = 0x20; // Load address
+            catalogue[19] = 0x00; catalogue[20] = 0x20; // Exec address
+            catalogue[21] = programData.length & 0xFF; catalogue[22] = (programData.length >> 8) & 0xFF; // Length
+            catalogue[23] = startSector & 0xFF; catalogue[24] = (startSector >> 8) & 0xFF; // Start sector
+            
+            for (let i = 0; i < sectorSize; i++) {
+                discImage[i] = catalogue[i];
+            }
+            
+            console.log("BBC iframe: Created simple SSD disc image:", discImage.length, "bytes");
+            return discImage;
+        }
+        
+        // Core function to load program into emulator
+        async function loadProgramIntoEmulator(programData) {
+            // Extract model parameter from URL (same as in initBBCEmulator)
+            const urlParams = new URLSearchParams(window.location.search);
+            const modelParam = urlParams.get('model');
+            
+            // Create a simple hash of the program data to detect duplicates
+            const programHash = btoa(String.fromCharCode.apply(null, new Uint8Array(programData))).substring(0, 32);
+            
+            // Prevent loading the same program multiple times
+            if (lastProgramHash === programHash) {
+                console.log("BBC iframe: Same program already loaded, skipping...");
+                return;
+            }
+            
+            // Prevent infinite loops by checking if we're already updating a disc
+            if (isUpdatingDisc) {
+                console.log("BBC iframe: Already updating disc, skipping...");
+                return;
+            }
+            
+            // Set flag to prevent concurrent updates
+            isUpdatingDisc = true;
+            
+            if (!emulatorReady || !programData) {
+                updateStatus("Emulator not ready or no program available");
+                isUpdatingDisc = false; // Clear flag on early return
+                return;
+            }
+            
+            // Prevent infinite reload loops
+            if (isReloading) {
+                console.log("BBC iframe: Already reloading, skipping...");
+                isUpdatingDisc = false; // Clear flag on early return
+                return;
+            }
+            
+            // Always allow loading new programs - reset the flag to allow reloading
+            discLoaded = false;
+            console.log("BBC iframe: Loading new program into emulator...");
+            
+            // Clear any existing disc from localStorage to force fresh load
+            try {
+                window.localStorage.removeItem("disc_PROGRAM.ssd");
+                console.log("BBC iframe: Cleared existing disc from localStorage");
+            } catch (e) {
+                console.log("BBC iframe: Could not clear localStorage:", e);
+            }
+            
+            // Instead of reloading the iframe, just force the emulator to reload the disc
+            // This avoids infinite loops while still ensuring fresh program loading
+            console.log("BBC iframe: Loading program directly into emulator...");
+            
+            updateStatus("Converting program to BBC disc image...");
+            
+            try {
+                // Convert the binary program to a BBC Micro SSD disc image
+                const discImage = createSSDDiscImage(programData, "PROGRAM");
+                
+                // Get the iframe element
+                const iframe = document.querySelector('iframe');
+                if (iframe && iframe.contentWindow) {
+                    // Access jsbeeb's processor and load the disc
+                    const jsbeebWindow = iframe.contentWindow;
+                    
+                    if (jsbeebWindow.processor && jsbeebWindow.processor.fdc) {
+                        // Create a File object for the disc image
+                        const file = new File([discImage], "program.ssd", { type: "application/octet-stream" });
+                        
+                        // Use jsbeeb's disc loading API directly
+                        const readFileAsBinaryString = async (file) => {
+                            return new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsBinaryString(file);
+                            });
+                        };
+                        
+                        // Save the disc to localStorage and let jsbeeb load it automatically
+                        console.log("BBC iframe: Saving disc to localStorage...");
+                        console.log("BBC iframe: Disc image size:", discImage.length, "bytes");
+                        
+                        try {
+                            // Convert disc image to string for localStorage
+                            const discString = Array.from(discImage).map(byte => String.fromCharCode(byte)).join('');
+                            console.log("BBC iframe: Converted disc to string, length:", discString.length);
+                            
+                            // Generate unique disc name
+                            discCounter++;
+                            const uniqueDiscName = `PROGRAM_${discCounter}.ssd`;
+                            const localStorageKey = `disc_${uniqueDiscName}`;
+                            
+                            // Save to localStorage with unique name
+                            window.localStorage.setItem(localStorageKey, discString);
+                            
+                            console.log("✅ Disc saved to localStorage:", localStorageKey);
+                            
+                            // Try to use jsbeeb's direct API to load the disc without reloading
+                            if (jsbeebWindow.IDE && jsbeebWindow.IDE.loadROM) {
+                                console.log("BBC iframe: Using jsbeeb IDE.loadROM API");
+                                jsbeebWindow.IDE.loadROM(discImage);
+                            } else {
+                                // Fallback: update iframe URL but with a flag to prevent loops
+                                console.log("BBC iframe: Using fallback iframe URL update");
+                                const timestamp = Date.now();
+                                // Include model parameter if present
+                                const modelQuery = modelParam ? `&model=${encodeURIComponent(modelParam)}` : '';
+                                iframe.src = `res/jsbeeb/dist/index.html?embed&disc1=local:${uniqueDiscName}&autoboot&t=${timestamp}${modelQuery}`;
+                                console.log("BBC iframe: Updated iframe URL to load new disc:", uniqueDiscName, "with timestamp:", timestamp);
+                            }
+                            
+                            // Update the program hash to prevent duplicate loads
+                            lastProgramHash = programHash;
+                            updateStatus("Program ready to run");
+                            
+                            // Create download link for the SSD file
+                            console.log("BBC iframe: Creating download link for SSD file...");
+                            const blob = new Blob([discImage], { type: 'application/octet-stream' });
+                            
+                            // Send the SSD blob to the parent platform for download menu integration
+                            if (window.parent && window.parent !== window) {
+                                window.parent.postMessage({
+                                    type: 'ssd_blob_ready',
+                                    blob: blob
+                                }, '*');
+                            }
+                            
+                            const url = URL.createObjectURL(blob);
+                            const downloadLink = document.createElement('a');
+                            downloadLink.href = url;
+                            downloadLink.download = uniqueDiscName;
+                            downloadLink.textContent = 'Download SSD file for testing';
+                            downloadLink.style.display = 'none';
+                            downloadLink.style.margin = '10px';
+                            downloadLink.style.padding = '5px';
+                            downloadLink.style.backgroundColor = '#007bff';
+                            downloadLink.style.color = 'white';
+                            downloadLink.style.textDecoration = 'none';
+                            downloadLink.style.borderRadius = '3px';
+                            downloadLink.style.textAlign = 'center';
+                            
+                            // Add download link to the page
+                            const statusDiv = document.getElementById('status');
+                            console.log("BBC iframe: Status div found:", !!statusDiv);
+                            if (statusDiv) {
+                                statusDiv.appendChild(downloadLink);
+                                console.log("BBC iframe: Download link added to status div");
+                            } else {
+                                console.error("BBC iframe: Status div not found!");
+                            }
+                            
+                            // Also update the fallback download area (hidden since we have menu download)
+                            const downloadArea = document.getElementById('download-area');
+                            const downloadLinkElement = document.getElementById('download-link');
+                            if (downloadArea && downloadLinkElement) {
+                                downloadLinkElement.href = url;
+                                downloadArea.style.display = 'none'; // Hidden since we have menu download
+                                console.log("BBC iframe: Fallback download area updated (hidden)");
+                            }
+                            
+                            // Set flag to indicate disc is loaded
+                            discLoaded = true;
+                            
+                            // Force jsbeeb to reload the disc by triggering a disc change event
+                            console.log("BBC iframe: Disc saved to localStorage, forcing jsbeeb to reload...");
+                            
+                            // Try to trigger a disc reload in jsbeeb
+                            if (jsbeebWindow.processor && jsbeebWindow.processor.fdc) {
+                                // Force reload by clearing any cached disc and triggering reload
+                                try {
+                                    // Send a custom event to jsbeeb to force disc reload
+                                    jsbeebWindow.postMessage({
+                                        type: 'force_disc_reload',
+                                        discName: 'PROGRAM.ssd'
+                                    }, '*');
+                                    console.log("BBC iframe: Sent force_disc_reload message to jsbeeb");
+                                } catch (e) {
+                                    console.log("BBC iframe: Could not send force_disc_reload message:", e);
+                                }
+                            }
+                            
+                            updateStatus("Program ready to run");
+                            
+                        } catch (localStorageError) {
+                            console.error("Error saving to localStorage:", localStorageError);
+                            updateStatus("Error saving disc: " + localStorageError.message);
+                        }
+                        
+                    } else {
+                        // Fallback: try to dispatch a drop event
+                        const file = new File([discImage], "program.ssd", { type: "application/octet-stream" });
+                        const dt = new DataTransfer();
+                        dt.items.add(file);
+                        
+                        const dropEvent = new DragEvent("drop", {
+                            dataTransfer: dt,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        
+                        jsbeebWindow.document.dispatchEvent(dropEvent);
+                        console.log("✅ Drop event dispatched to jsbeeb iframe (fallback)");
+                        
+                        setTimeout(() => {
+                            updateStatus("Program ready to run");
+                        }, 1000);
+                    }
+                } else {
+                    updateStatus("jsbeeb iframe not available for program loading");
+                }
+            } catch (e) {
+                updateStatus("Error loading program: " + e.message);
+                console.error("Error loading program:", e);
+            } finally {
+                // Clear the flag to allow future updates
+                isUpdatingDisc = false;
+            }
+        }
+        
+        // Initialize BBC Micro emulator
+        function initBBCEmulator() {
+            updateStatus("Loading jsbeeb emulator...");
+            
+            // Check if we have an embedBasic, loadBasic, autotype, or postMessage parameter to pass through
+            const urlParams = new URLSearchParams(window.location.search);
+            const embedBasic = urlParams.get('embedBasic');
+            const loadBasic = urlParams.get('loadBasic');
+            const postMessage = urlParams.get('postMessage');
+            const modelParam = urlParams.get('model');
+            const autoTypeParam = urlParams.get('autotype');
+            const autoRunParam = urlParams.get('autorun');
+            
+            // Create iframe to embed jsbeeb locally
+            const iframe = document.createElement('iframe');
+            let iframeSrc = 'res/jsbeeb/dist/index.html?embed';
+            
+            // Add model parameter if present
+            if (modelParam) {
+                iframeSrc += `&model=${encodeURIComponent(modelParam)}`;
+                console.log("BBC iframe: Passing model parameter to jsbeeb:", modelParam);
+            }
+            
+            if (loadBasic) {
+                // Loadbasic requires autorun
+                iframeSrc += `&autorun`;
+                console.log("BBC iframe: Passing autorun to jsbeeb:)");
+                // Use loadBasic parameter for large programs served from our server
+                iframeSrc += `&loadBasic=${encodeURIComponent(loadBasic)}&t=${Date.now()}`;
+                console.log("BBC iframe: Passing loadBasic to jsbeeb:", loadBasic);
+            } else if (embedBasic && embedBasic.length < 1000) {
+                // Only pass embedBasic if it's short enough to avoid URL length issues
+                iframeSrc += `&embedBasic=${encodeURIComponent(embedBasic)}&t=${Date.now()}`;
+                console.log("BBC iframe: Passing embedBasic to jsbeeb:", embedBasic);
+            } else if (postMessage === 'true') {
+                // For programs sent via postMessage, don't load a default disk
+                // This prevents the disk from overwriting the injected BASIC program
+                console.log("BBC iframe: Using postMessage approach - no default disk to prevent interference");
+                // Explicitly add a parameter to prevent any default disk loading
+                iframeSrc += '&nodisc=true';
+            } else if (autoTypeParam) {
+                // If only autotype is provided, do not autoboot any disc so typing works at the prompt
+                console.log("BBC iframe: autotype present, skipping default disc autoboot");
+            } else {
+                // Default: use local disc support and autoboot
+                iframeSrc += '&disc1=local:PROGRAM.ssd&autoboot';
+            }
+
+            // Pass through autotype if present (e.g., RUN%0a)
+            if (autoTypeParam) {
+                // URLSearchParams decodes %0a to a newline; re-encode so jsbeeb receives %0A
+                const autoTypeEncoded = encodeURIComponent(autoTypeParam);
+                iframeSrc += `&autotype=${autoTypeEncoded}`;
+                console.log("BBC iframe: Passing autotype to jsbeeb:", autoTypeParam, "(encoded:", autoTypeEncoded, ")");
+            }
+            
+
+            
+
+            iframe.src = iframeSrc;
+            iframe.style.width = '100%';
+            iframe.style.height = '100%';
+            iframe.style.border = 'none';
+            iframe.style.backgroundColor = '#000';
+            
+            // Store reference to current iframe
+            currentIframe = iframe;
+            
+            // Ensure keyboard focus goes to the emulator when clicked
+            iframe.addEventListener('load', function() {
+                const jsbeebWindow = iframe.contentWindow;
+                if (jsbeebWindow && jsbeebWindow.document) {
+                    // Focus the emulator screen when iframe is clicked
+                    iframe.addEventListener('click', function() {
+                        const screen = jsbeebWindow.document.getElementById('screen');
+                        if (screen) {
+                            screen.focus();
+                            console.log("BBC iframe: Focused emulator screen");
+                        }
+                    });
+                    
+                    // Also focus on mousedown to ensure immediate response
+                    iframe.addEventListener('mousedown', function() {
+                        const screen = jsbeebWindow.document.getElementById('screen');
+                        if (screen) {
+                            screen.focus();
+                            console.log("BBC iframe: Focused emulator screen (mousedown)");
+                        }
+                    });
+                    
+                    // Focus the iframe itself when clicked
+                    iframe.addEventListener('click', function() {
+                        iframe.focus();
+                        console.log("BBC iframe: Focused iframe");
+                    });
+                    
+                    // Prevent keyboard events from bubbling to parent
+                    iframe.addEventListener('keydown', function(e) {
+                        e.stopPropagation();
+                        console.log("BBC iframe: Keydown event captured:", e.key);
+                    });
+                    
+                    iframe.addEventListener('keyup', function(e) {
+                        e.stopPropagation();
+                        console.log("BBC iframe: Keyup event captured:", e.key);
+                    });
+                    
+                    // Set tabindex to make iframe focusable
+                    iframe.setAttribute('tabindex', '0');
+                    
+                    // Auto-focus the iframe when it loads
+                    setTimeout(() => {
+                        iframe.focus();
+                        console.log("BBC iframe: Auto-focused iframe");
+                    }, 1000);
+                }
+            });
+            
+            // Setup drag and drop functionality AFTER page loads
+            setTimeout(() => {
+                setupDragAndDrop();
+            }, 100);
+            
+            // Replace loading message with iframe
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = '';
+            container.appendChild(iframe);
+            
+            // Listen for iframe load
+            iframe.onload = function() {
+                updateStatus("jsbeeb emulator loaded");
+                emulatorReady = true;
+                isReloading = false; // Reset reload flag
+                
+                // Test emulator capabilities after a short delay to ensure everything is loaded
+                setTimeout(() => {
+                    testEmulatorCapabilities();
+                }, 2000);
+                
+                // Suppress audio messages from jsbeeb
+                try {
+                    const jsbeebWindow = iframe.contentWindow;
+                    if (jsbeebWindow && jsbeebWindow.document) {
+                        // Hide any existing yellow messages
+                        const yellowElements = jsbeebWindow.document.querySelectorAll('[style*="yellow"], [style*="#ffff00"], .warning, .alert, .notice');
+                        yellowElements.forEach(el => {
+                            el.style.display = 'none';
+                            el.style.visibility = 'hidden';
+                        });
+                        
+                        // Monitor for new messages and hide them
+                        const observer = new MutationObserver(function(mutations) {
+                            mutations.forEach(function(mutation) {
+                                mutation.addedNodes.forEach(function(node) {
+                                    if (node.nodeType === 1) { // Element node
+                                        if (node.style && (node.style.backgroundColor === 'yellow' || node.style.color === 'yellow')) {
+                                            node.style.display = 'none';
+                                        }
+                                        // Also check child elements
+                                        const yellowChildren = node.querySelectorAll('[style*="yellow"], [style*="#ffff00"]');
+                                        yellowChildren.forEach(el => el.style.display = 'none');
+                                    }
+                                });
+                            });
+                        });
+                        
+                        observer.observe(jsbeebWindow.document.body, {
+                            childList: true,
+                            subtree: true
+                        });
+                        
+                        console.log("BBC iframe: Audio message suppression enabled");
+                    }
+                } catch (e) {
+                    console.log("BBC iframe: Could not suppress audio messages:", e);
+                }
+                
+                // Check for any queued programs
+                setTimeout(() => {
+                    loadQueuedProgram();
+                }, 1000);
+            };
+            
+            iframe.onerror = function() {
+                updateStatus("Failed to load jsbeeb emulator");
+                console.error("BBC iframe: Failed to load jsbeeb iframe");
+            };
+        }
+        
+        // Listen for postMessage from parent window
+        window.addEventListener('message', function(event) {
+            console.log("BBC iframe: Received message from parent:", event.data);
+            
+            if (event.data && event.data.type === 'compiled_program' && event.data.program) {
+                console.log("BBC iframe: Received compiled program via postMessage:", event.data.program.length, "bytes");
+                
+                // Store the program and reset disc loaded flag for new program
+                lastCompiledProgram = event.data.program;
+                discLoaded = false; // Reset flag for new program
+                updateStatus("Program received via postMessage: " + event.data.program.length + " bytes");
+                
+                // Auto-load if requested
+                if (event.data.autoLoad) {
+                    if (emulatorReady) {
+                        console.log("BBC iframe: Emulator ready, auto-loading program from postMessage...");
+                        setTimeout(() => loadProgramIntoEmulator(event.data.program), 500);
+                    } else {
+                        console.log("BBC iframe: Emulator not ready yet, will auto-load when ready");
+                        // The program will be loaded when emulatorReady becomes true
+                    }
+                }
+            } else if (event.data && event.data.type === 'basic_program' && event.data.program) {
+                console.log("BBC iframe: Received BASIC program via postMessage:", event.data.program.length, "chars");
+                
+                // For BASIC programs sent via postMessage, we need to load them directly into the emulator
+                // Since they were sent via postMessage because they were too long for URL parameters
+                console.log("BBC iframe: Loading BASIC program directly into emulator via jsbeeb API");
+                
+                // Wait for the emulator to be ready, then load the BASIC program directly
+                const loadBasicProgram = async () => {
+                const iframe = document.querySelector('iframe');
+                    if (iframe && iframe.contentWindow && iframe.contentWindow.processor) {
+                        try {
+                            console.log("BBC iframe: Loading BASIC program directly into jsbeeb");
+                            
+                            const win = iframe.contentWindow;
+                            const processor = win.processor;
+                            
+                            // Wait for the processor to be ready (at idle address)
+                            const idleAddr = processor.model.isMaster ? 0xe7e6 : 0xe581;
+                            
+                            // Use jsbeeb's built-in BASIC tokenizer
+                            const tokenizeBasic = (program) => {
+                                try {
+                                    // Use jsbeeb's built-in tokenizer if available
+                                    if (win.jsbeeb && win.jsbeeb.tokenizeBasic) {
+                                        return win.jsbeeb.tokenizeBasic(program);
+                                    }
+                                    
+                                    // Fallback to simple approach
+                                    console.log("BBC iframe: Using fallback tokenizer");
+                                    let tokenized = '';
+                                    const lines = program.split('\n');
+                                    
+                                    for (let line of lines) {
+                                        line = line.trim();
+                                        if (line.length === 0) continue;
+                                        
+                                        // Add line length placeholder (will be calculated later)
+                                        let tokenizedLine = '\x00\x00';
+                                        
+                                        // Add line number
+                                        const spaceIndex = line.indexOf(' ');
+                                        if (spaceIndex > 0) {
+                                            const lineNum = parseInt(line.substring(0, spaceIndex));
+                                            if (!isNaN(lineNum)) {
+                                                tokenizedLine += String.fromCharCode(lineNum & 0xff, (lineNum >> 8) & 0xff);
+                                                tokenizedLine += line.substring(spaceIndex + 1) + '\r';
+                                            }
+                                        }
+                                        
+                                        // Calculate and set line length
+                                        const lineLength = tokenizedLine.length - 2;
+                                        tokenizedLine = String.fromCharCode(lineLength & 0xff, (lineLength >> 8) & 0xff) + tokenizedLine.substring(2);
+                                        
+                                        tokenized += tokenizedLine;
+                                    }
+                                    
+                                    tokenized += '\x00\xff'; // End marker
+                                    return tokenized;
+                                } catch (e) {
+                                    console.error("BBC iframe: Tokenizer error:", e);
+                                    return '';
+                                }
+                            };
+                            
+                            // Use a hook to inject the program when the processor is idle
+                            const hook = processor.debugInstruction.add(function (addr) {
+                                if (addr !== idleAddr) return;
+                                
+                                try {
+                                    console.log("BBC iframe: Processor idle, injecting BASIC program");
+                                    
+                                    const tokenized = tokenizeBasic(event.data.program);
+                                    if (!tokenized || tokenized.length === 0) {
+                                        console.error("BBC iframe: Tokenization failed");
+                                        hook.remove();
+                                        return;
+                                    }
+                                    console.log("BBC iframe: Tokenized data length:", tokenized.length, "type:", typeof tokenized);
+                                    
+                                    const page = processor.readmem(0x18) << 8;
+                                    console.log("BBC iframe: Page address from 0x18:", page, "hex:", page.toString(16));
+                                    
+                                    // Write tokenized program to memory
+                                    if (typeof tokenized === 'string') {
+                                        for (let i = 0; i < tokenized.length; i++) {
+                                            processor.writemem(page + i, tokenized.charCodeAt(i));
+                                        }
+                                    } else if (tokenized instanceof Uint8Array) {
+                                        for (let i = 0; i < tokenized.length; i++) {
+                                            processor.writemem(page + i, tokenized[i]);
+                                        }
+                                    } else {
+                                        console.error("BBC iframe: Unknown tokenized data type:", typeof tokenized);
+                                        hook.remove();
+                                        return;
+                                    }
+                                    
+                                    // Set VARTOP (0x12/3) and TOP(0x02/3)
+                                    const end = page + tokenized.length;
+                                    const endLow = end & 0xff;
+                                    const endHigh = (end >>> 8) & 0xff;
+                                    console.log("BBC iframe: End address calculation - page:", page, "length:", tokenized.length, "end:", end, "hex:", end.toString(16));
+                                    console.log("BBC iframe: Writing end address to 0x02/0x03 and 0x12/0x13 - low:", endLow, "high:", endHigh);
+                                    processor.writemem(0x02, endLow);
+                                    processor.writemem(0x03, endHigh);
+                                    processor.writemem(0x12, endLow);
+                                    processor.writemem(0x13, endHigh);
+                                    
+                                    hook.remove();
+                                    
+                                    // Auto-run the program
+                                    if (event.data.autoLoad && win.processor && win.processor.sysvia) {
+                                        setTimeout(() => {
+                                            console.log("BBC iframe: Auto-running BASIC program via sysvia");
+
+                                            const KEY_R = 82; // utils.keyCodes.R
+                                            const KEY_U = 85; // utils.keyCodes.U
+                                            const KEY_N = 78; // utils.keyCodes.N
+                                            const KEY_ENTER = 13; // utils.keyCodes.ENTER
+
+                                            const press = (code, delay) => new Promise(resolve => {
+                                                setTimeout(() => {
+                                                    try {
+                                                        win.processor.sysvia.keyDown(code, false);
+                                                        win.processor.sysvia.keyUp(code);
+                                                    } catch (e) {
+                                                        console.warn("BBC iframe: sysvia key press failed", code, e);
+                                                    }
+                                                    resolve();
+                                                }, delay);
+                                            });
+
+                                            // Sequence: R, U, N, ENTER
+                                            (async () => {
+                                                await press(KEY_R, 0);
+                                                await press(KEY_U, 60);
+                                                await press(KEY_N, 120);
+                                                await press(KEY_ENTER, 200);
+                                                console.log("BBC iframe: RUN command executed (sysvia)");
+                                            })();
+                                        }, 200);
+                                    }
+                                    
+                                    console.log("BBC iframe: BASIC program loaded and ready to run");
+                                    
+                                    // Debug: Check if BASIC program is actually in memory
+                                    setTimeout(() => {
+                                        try {
+                                            const basicStart = processor.readmem(0x12) | (processor.readmem(0x13) << 8);
+                                            const basicEnd = processor.readmem(0x02) | (processor.readmem(0x03) << 8);
+                                            console.log("BBC iframe: BASIC program memory range:", basicStart, "to", basicEnd);
+                                            
+                                            // Read first few bytes of BASIC program
+                                            let basicPreview = "";
+                                            for (let i = 0; i < Math.min(20, basicEnd - basicStart); i++) {
+                                                basicPreview += String.fromCharCode(processor.readmem(basicStart + i));
+                                            }
+                                            console.log("BBC iframe: BASIC program preview:", basicPreview);
+                                        } catch (e) {
+                                            console.log("BBC iframe: Could not read BASIC program from memory:", e);
+                                        }
+                                    }, 1000);
+                                    
+                                    // Check again after 3 seconds to see if disk loading overwrote it
+                                    setTimeout(() => {
+                                        try {
+                                            const basicStart = processor.readmem(0x12) | (processor.readmem(0x13) << 8);
+                                            const basicEnd = processor.readmem(0x02) | (processor.readmem(0x03) << 8);
+                                            console.log("BBC iframe: BASIC program memory range (3s later):", basicStart, "to", basicEnd);
+                                            
+                                            if (basicStart === 0x8000 && basicEnd === 0x8000) {
+                                                console.log("BBC iframe: WARNING - BASIC program appears to have been overwritten by disk loading!");
+                                            }
+                                        } catch (e) {
+                                            console.log("BBC iframe: Could not read BASIC program from memory (3s later):", e);
+                                        }
+                                    }, 3000);
+                                    updateStatus("BBC BASIC program loaded successfully");
+                                    
+                                } catch (error) {
+                                    console.error("BBC iframe: Error in processor hook:", error);
+                                    hook.remove();
+                                }
+                            });
+                            
+                            console.log("BBC iframe: BASIC program injection hook installed");
+                            
+                        } catch (error) {
+                            console.error("BBC iframe: Error loading BASIC program:", error);
+                            updateStatus("Error loading BASIC program: " + error.message);
+                        }
+                    } else {
+                        // Emulator not ready yet, try again in a moment
+                        setTimeout(loadBasicProgram, 100);
+                    }
+                };
+                
+                loadBasicProgram();
+            } else if (event.data && event.data.type) {
+                // Handle control commands
+                switch (event.data.type) {
+                    case 'reset':
+                        console.log("BBC iframe: Received reset command");
+                        updateStatus("Resetting BBC emulator and reloading program...");
+                        
+                        if (resetSupported) {
+                            // Try to use the emulator's reset function, then reload the program
+                            const iframe = document.querySelector('iframe');
+                            if (iframe && iframe.contentWindow && iframe.contentWindow.processor) {
+                                try {
+                                    iframe.contentWindow.processor.reset();
+                                    console.log("BBC iframe: Emulator reset successfully");
+                                    
+                                    // After reset, reload the last program if available
+                                    if (lastCompiledProgram && emulatorReady) {
+                                        console.log("BBC iframe: Reloading program after reset");
+                                        // Check if it's a BASIC program (string) or compiled program (Uint8Array)
+                                        if (typeof lastCompiledProgram === 'string') {
+                                            // It's a BASIC program, reload using embedBasic
+                                            const iframe = document.querySelector('iframe');
+                                            if (iframe) {
+                                                const encodedBasic = encodeURIComponent(lastCompiledProgram);
+                                                const newURL = `res/jsbeeb/dist/index.html?embed&embedBasic=${encodedBasic}`;
+                                                iframe.src = newURL;
+                                                console.log("BBC iframe: Reloaded BASIC program after reset");
+                                            }
+                                        } else {
+                                            // It's a compiled program, use loadProgramIntoEmulator
+                                            setTimeout(() => loadProgramIntoEmulator(lastCompiledProgram), 500);
+                                        }
+                                    } else {
+                                        console.log("BBC iframe: No program to reload for reset");
+                                        updateStatus("BBC emulator reset (no program to reload)");
+                                    }
+                                } catch (e) {
+                                    console.log("BBC iframe: Error resetting emulator:", e);
+                                    updateStatus("Error resetting emulator: " + e.message);
+                                }
+                            }
+                        } else {
+                            // Fallback: reload the iframe and then reload the program
+                            console.log("BBC iframe: Reset not supported, reloading iframe and program");
+                            updateStatus("Reloading BBC emulator and program...");
+                            
+                            const iframe = document.querySelector('iframe');
+                            if (iframe) {
+                                // Store the program to reload after iframe reload
+                                const programToReload = lastCompiledProgram;
+                                
+                                // Reload the iframe to reset the emulator
+                                const currentSrc = iframe.src;
+                                iframe.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 'reset=' + Date.now();
+                                
+                                // Set up a listener to reload the program after iframe reloads
+                                const onIframeReload = () => {
+                                    console.log("BBC iframe: Iframe reloaded, reloading program");
+                                    if (programToReload) {
+                                        setTimeout(() => {
+                                            lastCompiledProgram = programToReload;
+                                            emulatorReady = true;
+                                            // Check if it's a BASIC program (string) or compiled program (Uint8Array)
+                                            if (typeof programToReload === 'string') {
+                                                // It's a BASIC program, reload using embedBasic
+                                                const encodedBasic = encodeURIComponent(programToReload);
+                                                const newURL = `res/jsbeeb/dist/index.html?embed&embedBasic=${encodedBasic}`;
+                                                iframe.src = newURL;
+                                                console.log("BBC iframe: Reloaded BASIC program after iframe reset");
+                                            } else {
+                                                // It's a compiled program, use loadProgramIntoEmulator
+                                                loadProgramIntoEmulator(programToReload);
+                                            }
+                                        }, 1000);
+                                    }
+                                    iframe.removeEventListener('load', onIframeReload);
+                                };
+                                iframe.addEventListener('load', onIframeReload);
+                                
+                                updateStatus("BBC emulator reloaded, program will reload shortly");
+                            }
+                        }
+                        break;
+                        
+                    case 'pause':
+                        console.log("BBC iframe: Received pause command");
+                        updateStatus("Pausing BBC emulator...");
+                        
+                        if (pauseResumeSupported) {
+                            const iframe = document.querySelector('iframe');
+                            if (iframe && iframe.contentWindow && iframe.contentWindow.processor) {
+                                try {
+                                    iframe.contentWindow.processor.pause();
+                                    console.log("BBC iframe: Emulator paused successfully");
+                                    updateStatus("BBC emulator paused");
+                                } catch (e) {
+                                    console.log("BBC iframe: Error pausing emulator:", e);
+                                    updateStatus("Error pausing emulator: " + e.message);
+                                }
+                            }
+                        } else {
+                            console.log("BBC iframe: Pause not supported by emulator");
+                            updateStatus("Pause not supported by emulator");
+                        }
+                        break;
+                        
+                    case 'resume':
+                        console.log("BBC iframe: Received resume command");
+                        updateStatus("Resuming BBC emulator...");
+                        
+                        if (pauseResumeSupported) {
+                            const iframe = document.querySelector('iframe');
+                            if (iframe && iframe.contentWindow && iframe.contentWindow.processor) {
+                                try {
+                                    iframe.contentWindow.processor.resume();
+                                    console.log("BBC iframe: Emulator resumed successfully");
+                                    updateStatus("BBC emulator resumed");
+                                } catch (e) {
+                                    console.log("BBC iframe: Error resuming emulator:", e);
+                                    updateStatus("Error resuming emulator: " + e.message);
+                                }
+                            }
+                        } else {
+                            console.log("BBC iframe: Resume not supported by emulator");
+                            updateStatus("Resume not supported by emulator");
+                        }
+                        break;
+                        
+                    default:
+                        console.log("BBC iframe: Unknown message type:", event.data.type);
+                }
+            }
+        });
+        
+        function checkForProgramInURL() {
+            console.log("BBC iframe: Checking for program in URL parameters...");
+            console.log("BBC iframe: Current URL:", window.location.href);
+            console.log("BBC iframe: Search params:", window.location.search);
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            const programData = urlParams.get('program');
+            const programHex = urlParams.get('hex');
+            const gzipData = urlParams.get('gzip');
+            const embedBasic = urlParams.get('embedBasic');
+            const loadBasic = urlParams.get('loadBasic');
+            
+            console.log("BBC iframe: program param:", programData ? "found (" + programData.length + " chars)" : "not found");
+            console.log("BBC iframe: hex param:", programHex ? "found (" + programHex.length + " chars)" : "not found");
+            console.log("BBC iframe: gzip param:", gzipData ? "found (" + gzipData.length + " chars)" : "not found");
+            console.log("BBC iframe: embedBasic param:", embedBasic ? "found (" + embedBasic.length + " chars)" : "not found");
+            console.log("BBC iframe: loadBasic param:", loadBasic ? "found (" + loadBasic + ")" : "not found");
+            
+            if (gzipData) {
+                try {
+                    console.log("BBC iframe: Attempting to decompress gzip program data...");
+                    
+                    // Convert hex string back to Uint8Array
+                    const compressedBytes = new Uint8Array(gzipData.length / 2);
+                    for (let i = 0; i < gzipData.length; i += 2) {
+                        compressedBytes[i / 2] = parseInt(gzipData.substr(i, 2), 16);
+                    }
+                    
+                    console.log("BBC iframe: Compressed data size:", compressedBytes.length, "bytes");
+                    
+                    // Decompress using pako (if available) or fallback
+                    let programArray;
+                    if (typeof pako !== 'undefined') {
+                        programArray = pako.inflate(compressedBytes);
+                        console.log("BBC iframe: Decompressed to:", programArray.length, "bytes");
+                    } else {
+                        // Fallback: try to use browser's built-in decompression
+                        console.log("BBC iframe: pako not available, trying browser decompression...");
+                        // For now, just use the compressed data as-is
+                        programArray = compressedBytes;
+                    }
+                    
+                    console.log("BBC iframe: Found program in URL (gzip): " + programArray.length + " bytes");
+                    console.log("BBC iframe: First 16 bytes:", Array.from(programArray.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    
+                    lastCompiledProgram = programArray;
+                    discLoaded = false; // Reset flag for new program
+                    updateStatus("Program loaded from URL (gzip): " + programArray.length + " bytes");
+                    
+                    // Auto-load when emulator is ready
+                    if (emulatorReady) {
+                        console.log("BBC iframe: Emulator ready, auto-loading program...");
+                        setTimeout(() => loadProgramIntoEmulator(programArray), 500);
+                    } else {
+                        console.log("BBC iframe: Emulator not ready yet, will auto-load when ready");
+                    }
+                    
+                } catch (e) {
+                    console.error("BBC iframe: Error decompressing gzip program data:", e);
+                    updateStatus("Error decompressing program from URL: " + e.message);
+                }
+            } else if (programData) {
+                try {
+                    console.log("BBC iframe: Attempting to decode base64 program data...");
+                    
+                    // Decode base64 data
+                    const binaryString = atob(programData);
+                    const programArray = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        programArray[i] = binaryString.charCodeAt(i);
+                    }
+                    
+                    console.log("BBC iframe: Found program in URL (base64): " + programArray.length + " bytes");
+                    console.log("BBC iframe: First 16 bytes:", Array.from(programArray.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    
+                    lastCompiledProgram = programArray;
+                    discLoaded = false; // Reset flag for new program
+                    updateStatus("Program loaded from URL (base64): " + programArray.length + " bytes");
+                    
+                    // Auto-load when emulator is ready
+                    if (emulatorReady) {
+                        console.log("BBC iframe: Emulator ready, auto-loading program...");
+                        setTimeout(() => loadProgramIntoEmulator(programArray), 500);
+                    } else {
+                        console.log("BBC iframe: Emulator not ready yet, will auto-load when ready");
+                    }
+                    
+                } catch (e) {
+                    console.error("BBC iframe: Error decoding base64 program data:", e);
+                    updateStatus("Error decoding program from URL: " + e.message);
+                }
+            } else if (programHex) {
+                try {
+                    console.log("BBC iframe: Attempting to decode hex program data...");
+                    
+                    // Decode hex string
+                    const hexString = decodeURIComponent(programHex);
+                    const hexValues = hexString.split(' ');
+                    const programArray = new Uint8Array(hexValues.length);
+                    
+                    for (let i = 0; i < hexValues.length; i++) {
+                        programArray[i] = parseInt(hexValues[i], 16);
+                    }
+                    
+                    console.log("BBC iframe: Found program in URL (hex): " + programArray.length + " bytes");
+                    console.log("BBC iframe: First 16 bytes:", Array.from(programArray.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    
+                    lastCompiledProgram = programArray;
+                    discLoaded = false; // Reset flag for new program
+                    updateStatus("Program loaded from URL (hex): " + programArray.length + " bytes");
+                    
+                    // Auto-load when emulator is ready
+                    if (emulatorReady) {
+                        console.log("BBC iframe: Emulator ready, auto-loading program...");
+                        setTimeout(() => loadProgramIntoEmulator(programArray), 500);
+                    } else {
+                        console.log("BBC iframe: Emulator not ready yet, will auto-load when ready");
+                    }
+                    
+                } catch (e) {
+                    console.error("BBC iframe: Error decoding hex program data:", e);
+                    updateStatus("Error decoding program from URL: " + e.message);
+                }
+            } else if (loadBasic) {
+                console.log("BBC iframe: Found loadBasic parameter:", loadBasic);
+                updateStatus("BBC BASIC program will be loaded from URL: " + loadBasic);
+                
+                // The iframe src already contains the loadBasic parameter,
+                // so jsbeeb should automatically load and run the BASIC program from the URL
+                updateStatus("BBC BASIC program ready to run from URL");
+            } else if (embedBasic) {
+                console.log("BBC iframe: Found embedBasic parameter, length:", embedBasic.length);
+                
+                if (embedBasic.length < 1000) {
+                    console.log("BBC iframe: embedBasic is short enough, passing to jsbeeb...");
+                updateStatus("BBC BASIC program found in URL");
+                
+                    // For short embedBasic, we don't need to process it - just pass it through to jsbeeb
+                // The jsbeeb emulator will handle the BASIC tokenization and execution
+                console.log("BBC iframe: embedBasic content:", embedBasic);
+                
+                // The iframe src already contains the embedBasic parameter,
+                // so jsbeeb should automatically load and run the BASIC program
+                updateStatus("BBC BASIC program ready to run");
+                } else {
+                    console.log("BBC iframe: embedBasic too long for URL, will be sent via postMessage");
+                    updateStatus("BBC BASIC program too long for URL, waiting for postMessage...");
+                    
+                    // Store the BASIC program for postMessage delivery
+                    lastCompiledProgram = embedBasic;
+                    discLoaded = false;
+                }
+            } else {
+                console.log("BBC iframe: No program parameters found in URL");
+                updateStatus("No program found in URL - ready for compilation");
+            }
+        }
+        
+        // Initialize when page loads
+        window.addEventListener('load', function() {
+            console.log("BBC iframe: Page loaded, initializing emulator");
+            initBBCEmulator();
+        });
+        
+        // Make checkForProgramInURL available globally
+        window.checkForProgramInURL = checkForProgramInURL;
+        
+        console.log("BBC iframe: Script loaded and ready");
+    </script>
+</body>
+</html> 

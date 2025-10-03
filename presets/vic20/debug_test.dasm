@@ -1,0 +1,45 @@
+        processor 6502
+        org $1001
+        
+        ; BASIC header
+        .word basic
+        .word 0
+basic:
+        .word 0
+        
+start:
+        ; Test 1: Set border color to white (value 1)
+        lda #$01
+        sta $900F  ; Border color register
+        
+        ; Test 2: Set background color to black (value 0)
+        lda #$00
+        sta $900F  ; Background color register (same register, different bit)
+        
+        ; Test 3: Set border color to red (value 2)
+        lda #$02
+        sta $900F  ; Border color register
+        
+        ; Test 4: Set border color to blue (value 6)
+        lda #$06
+        sta $900F  ; Border color register
+        
+        ; Test 5: Set border color to green (value 5)
+        lda #$05
+        sta $900F  ; Border color register
+        
+        ; Test 6: Set border color to yellow (value 7)
+        lda #$07
+        sta $900F  ; Border color register
+        
+        ; Test 7: Set border color to purple (value 4)
+        lda #$04
+        sta $900F  ; Border color register
+        
+        ; Test 8: Set border color to orange (value 3)
+        lda #$03
+        sta $900F  ; Border color register
+        
+        ; Infinite loop to keep program running
+loop:
+        jmp loop 

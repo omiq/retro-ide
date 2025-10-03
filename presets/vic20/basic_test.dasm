@@ -1,0 +1,25 @@
+        processor 6502
+        org $1001
+        
+        ; BASIC header
+        .word basic
+        .word 0
+basic:
+        .word 0
+        
+start:
+        ; Set border color to white (value 1)
+        lda #$01
+        sta $900F  ; Border color register
+        
+        ; Set background color to black (value 0)
+        lda #$00
+        sta $900F  ; Background color register
+        
+        ; Set border color to red (value 2)
+        lda #$02
+        sta $900F  ; Border color register
+        
+        ; Infinite loop to keep program running
+loop:
+        jmp loop 

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DOSBox Emulator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            font-family: monospace;
+            overflow: hidden;
+        }
+        #jsdos {
+            width: 100%;
+            height: 100vh;
+            display: block;
+            outline: none;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            font-family: monospace;
+            overflow: hidden;
+        }
+        
+        /* Ensure the iframe can receive focus */
+        html, body {
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="jsdos"></canvas>
+    
+    <script src="https://js-dos.com/6.22/current/js-dos.js"></script>
+    <script>
+        let dosInstance = null;
+        let fs = null;
+        let main = null;
+        let ci = null;
+        
+        // Track whether DOSBox should accept keyboard input
+        let dosBoxHasFocus = true; // Start with focus since this is the iframe
+        
+        // Initialize the emulator
+        async function initEmulator() {
+            if (isInitialized) {
+                console.log("Emulator already initialized, skipping");
+                return;
+            }
+            
+            console.log("Initializing DOSBox emulator in iframe...");
+            
+            const canvas = document.getElementById('jsdos');
+            
+            try {
+                dosInstance = window.Dos(canvas, {
+                    wdosboxUrl: "https://js-dos.com/6.22/current/wdosbox.js",
+                });
+
+                dosInstance.ready((fileSystem, mainFunction) => {
+                    console.log("js-dos ready, extracting Turbo C...");
+                    
+                    // Store the file system object
+                    fs = fileSystem;
+                    main = mainFunction;
+                    
+                    // Extract Turbo C from the zip file
+                    fs.extract("res/MSDOS.zip").then(() => {
+                        console.log("Turbo C extracted, setting up ANSI support...");
+                        
+                        // Create CONFIG.SYS to load ANSI.SYS for ANSI escape code support
+                        const configSys = "DEVICE=C:\\DOS\\ANSI.SYS\n";
+                        fs.createFile("C:\\CONFIG.SYS", configSys);
+                        console.log("Created CONFIG.SYS with ANSI.SYS support");
+                        
+                        // Start DOS and get command interface
+                        main(["-c", "cd\\"]).then((commandInterface) => {
+                            ci = commandInterface;
+                            isInitialized = true;
+                            console.log("DOSBox ready with Turbo C available");
+                            
+                            // Make important objects available globally for debugging
+                            window.ci = ci;
+                            window.dosInstance = dosInstance;
+                            window.fs = fs;
+                            window.main = main;
+                            
+                            console.log("Global objects available: window.ci, window.dosInstance, window.fs, window.main");
+                            
+                            // Also make objects available in parent window for debugging
+                            try {
+                                window.parent.ci = ci;
+                                window.parent.dosInstance = dosInstance;
+                                window.parent.fs = fs;
+                                window.parent.main = main;
+                                console.log("Objects also available in parent window: window.parent.ci, window.parent.dosInstance, etc.");
+                            } catch (error) {
+                                console.log("Could not access parent window directly:", error);
+                            }
+                            
+                            // Send debug info to parent window via postMessage (without functions)
+                            window.parent.postMessage({
+                                type: 'debug_objects',
+                                message: 'Debug objects available in iframe: ci, dosInstance, fs, main'
+                            }, '*');
+                            
+                            // Check if keypress simulation methods are available
+                            console.log("CI simulateKeyEvent method available:", typeof ci.simulateKeyEvent === 'function');
+                            console.log("CI sendKeyPress method available:", typeof ci.sendKeyPress === 'function');
+                            
+                            // Check for other possible keypress methods
+                            console.log("DOSBox methods:", Object.getOwnPropertyNames(dosInstance));
+                            console.log("DOSBox prototype methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(dosInstance)));
+                            
+                            // Check if there's a keyboard or input method
+                            if (dosInstance.keyboard) {
+                                console.log("DOSBox keyboard methods:", Object.getOwnPropertyNames(dosInstance.keyboard));
+                            }
+                            
+                            // Notify parent window that emulator is ready
+                            window.parent.postMessage({
+                                type: 'emulator_capabilities',
+                                capabilities: {
+                                    pauseResume: true,
+                                    reset: true
+                                }
+                            }, '*');
+                            
+                            // Request focus for the iframe
+                            window.focus();
+                            document.body.focus();
+                            
+                            // Check for program in URL parameters
+                            checkForProgramInURL();
+                        }).catch((error) => {
+                            console.error("Error starting DOS:", error);
+                        });
+                    }).catch((error) => {
+                        console.error("Error extracting Turbo C:", error);
+                    });
+                });
+            } catch (error) {
+                console.error("Error creating js-dos instance:", error);
+            }
+        }
+        
+        // Check for program data in URL parameters
+        function checkForProgramInURL() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const programData = urlParams.get('program');
+            
+            if (programData) {
+                try {
+                    const program = JSON.parse(decodeURIComponent(programData));
+                    loadProgram(program);
+                } catch (error) {
+                    console.error("Error parsing program data from URL:", error);
+                }
+            }
+        }
+        
+        // Load a program into the emulator
+        function loadProgram(programData, filename = 'program.c') {
+            if (!fs || !ci) {
+                console.error("Emulator not ready yet");
+                return;
+            }
+            
+            console.log("Loading program:", programData, "with filename:", filename);
+            
+            // Convert program data to source code
+            const sourceCode = new TextDecoder().decode(programData);
+            
+            // Check file extension to determine compilation method
+            if (filename.toLowerCase().endsWith('.bas')) {
+                compileWithQBASIC(sourceCode, filename);
+            } else if (filename.toLowerCase().endsWith('.pas')) {
+                compileWithTurboPascal(sourceCode, filename);
+            } else if (filename.toLowerCase().endsWith('.asm')) {
+                compileWithNASM(sourceCode, filename);
+            } else {
+                compileWithTurboC(sourceCode, filename);
+            }
+        }
+        
+        // Track if we've already initialized
+        let isInitialized = false;
+        
+        // Compile C program with Turbo C
+        async function compileWithTurboC(sourceCode, filename) {
+            if (!fs || !ci) {
+                console.error("Emulator not ready for compilation");
+                return;
+            }
+            
+            // Convert line endings to DOS format (CRLF)
+            const dosSourceCode = sourceCode.replace(/\n/g, '\r\n');
+            
+            try {
+                // Add a small delay to ensure file system is ready
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Delete existing file if it exists
+                await ci.shell('DEL \\CODE\\TC\\' + filename);
+                
+                // Create the file
+                await fs.createFile("\\CODE\\TC\\" + filename, dosSourceCode);
+                console.log("File created successfully: \\TC\\" + filename);
+                
+                // Compile and run
+                await ci.shell('z:rescan');
+                await ci.shell('CD C:\\CODE\\tc');
+                await ci.shell('tcc -IC:\\CODE\\TC\\INCLUDE -LC:\\CODE\\TC\\LIB C:\\CODE\\TC\\' + filename + ' graphics.lib');
+                await ci.shell('C:\\CODE\\TC\\' + filename.replace('.c', ''));
+                
+                console.log("Program compiled and executed successfully");
+            } catch (error) {
+                console.error("Error during compilation:", error);
+            }
+        }
+        
+        // Compile and run QBASIC program
+        async function compileWithQBASIC(sourceCode, filename) {
+            if (!fs || !ci) {
+                console.error("Emulator not ready for QBASIC compilation");
+                return;
+            }
+            
+            // Convert line endings to DOS format (CRLF)
+            const dosSourceCode = sourceCode.replace(/\n/g, '\r\n');
+            
+            try {
+                // Add a small delay to ensure file system is ready
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Delete existing file if it exists
+                await ci.shell('DEL C:\\DOS\\' + filename);
+                
+                // Create the file in C:\DOS directory
+                await fs.createFile("C:\\DOS\\" + filename, dosSourceCode);
+                console.log("QBASIC file created successfully: C:\\DOS\\" + filename);
+                
+                // Run QBASIC with the file
+                await ci.shell('z:rescan');
+                await ci.shell('CD C:\\DOS');
+                await ci.shell('QBASIC /RUN ' + filename);
+                
+                console.log("QBASIC program executed successfully");
+            } catch (error) {
+                console.error("Error during QBASIC compilation:", error);
+            }
+        }
+        
+        // Compile and run a Pascal program with Turbo Pascal
+        async function compileWithTurboPascal(sourceCode, filename) {
+            if (!fs || !ci) {
+                console.error("Emulator not ready for Turbo Pascal compilation");
+                return;
+            }
+            
+            // Convert line endings to DOS format (CRLF)
+            const dosSourceCode = sourceCode.replace(/\n/g, '\r\n');
+            
+            try {
+                // Add a small delay to ensure file system is ready
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Delete existing file if it exists
+                await ci.shell('DEL C:\\CODE\\TP\\' + filename);
+                
+                // Create the file in C:\CODE\TP directory
+                await fs.createFile("C:\\CODE\\TP\\" + filename, dosSourceCode);
+                console.log("Pascal file created successfully: C:\\CODE\\TP\\" + filename);
+                
+                // Change to Turbo Pascal directory and compile
+                await ci.shell('z:rescan');
+                await ci.shell('CD C:\\CODE\\TP');
+                
+                // Compile the Pascal program
+                const baseFilename = filename.replace('.pas', '');
+                await ci.shell('TPC ' + filename);
+                
+                // Run the compiled program
+                await ci.shell(baseFilename + '.EXE');
+                
+                console.log("Turbo Pascal program compiled and executed successfully");
+            } catch (error) {
+                console.error("Error during Turbo Pascal compilation:", error);
+            }
+        }
+        
+        // Compile and run an assembly program with NASM
+        async function compileWithNASM(sourceCode, filename) {
+            if (!fs || !ci) {
+                console.error("Emulator not ready for NASM compilation");
+                return;
+            }
+            
+            // Convert line endings to DOS format (CRLF)
+            const dosSourceCode = sourceCode.replace(/\n/g, '\r\n');
+            
+            try {
+                // Add a small delay to ensure file system is ready
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Delete existing files if they exist
+                const baseFilename = filename.replace('.asm', '');
+                await ci.shell('DEL C:\\CODE\\NASM\\' + filename);
+                await ci.shell('DEL C:\\CODE\\NASM\\' + baseFilename + '.COM');
+                
+                // Create the file in C:\CODE\NASM directory
+                await fs.createFile("C:\\CODE\\NASM\\" + filename, dosSourceCode);
+                console.log("Assembly file created successfully: C:\\CODE\\NASM\\" + filename);
+                
+                // Change to NASM directory and compile
+                await ci.shell('z:rescan');
+                await ci.shell('CD C:\\CODE\\NASM');
+                
+                // Assemble directly to COM file (no linker needed)
+                await ci.shell('NASM -f bin ' + filename + ' -o ' + baseFilename + '.COM');
+                
+                // Run the compiled program
+                await ci.shell(baseFilename + '.COM');
+                
+                console.log("NASM program compiled and executed successfully");
+            } catch (error) {
+                console.error("Error during NASM compilation:", error);
+            }
+        }
+        
+        // Listen for messages from parent window
+        window.addEventListener('message', (event) => {
+            // Filter out sync messages to reduce console spam
+            if (event.data && event.data.type === 'sync_sleep_message') {
+                return;
+            }
+            
+            console.log("Received message from parent:", event.data);
+            
+            // Only process messages if emulator is initialized
+            if (!isInitialized) {
+                console.log("Emulator not initialized yet, ignoring message");
+                return;
+            }
+            
+            switch (event.data.type) {
+                case 'compiled_program':
+                    if (event.data.program && fs && ci) {
+                        const filename = event.data.filename || 'program.c';
+                        loadProgram(event.data.program, filename);
+                    } else {
+                        console.log("Cannot load program - emulator not ready");
+                    }
+                    break;
+                    
+                case 'reset':
+                    if (ci) {
+                        ci.shell('cd\\');
+                    }
+                    break;
+                    
+                case 'pause':
+                case 'resume':
+                    // Pause/resume functionality disabled for now - not essential
+                    console.log("Pause/Resume functionality disabled");
+                    break;
+                    
+                case 'stop':
+                case 'reset':
+                    // Stop/reset messages are now handled by parent window reloading the iframe
+                    console.log("Stop/Reset message received - parent window will handle iframe reload");
+                    break;
+            }
+        });
+        
+        // Initialize when page loads
+        window.addEventListener('load', initEmulator);
+        
+        // Ensure the iframe can receive focus
+        document.addEventListener('click', () => {
+            document.body.focus();
+        });
+        
+        // Set tabindex to make the body focusable
+        document.body.tabIndex = -1;
+        
+        // Expose functions globally for debugging
+        window.checkForProgramInURL = checkForProgramInURL;
+        window.loadProgram = loadProgram;
+        window.compileWithTurboC = compileWithTurboC;
+        window.compileWithQBASIC = compileWithQBASIC;
+        window.compileWithTurboPascal = compileWithTurboPascal;
+        window.compileWithNASM = compileWithNASM;
+    </script>
+</body>
+</html>

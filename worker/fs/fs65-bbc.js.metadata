@@ -1,0 +1,136 @@
+{
+  "files": [
+    {
+      "filename": "/cfg/bbc.cfg",
+      "start": 0,
+      "end": 1250
+    },
+    {
+      "filename": "/lib/bbc.lib",
+      "start": 1250,
+      "end": 1777185
+    },
+    {
+      "filename": "/include/bbc.h",
+      "start": 1777185,
+      "end": 1782346
+    },
+    {
+      "filename": "/asminc/bbc.inc",
+      "start": 1782346,
+      "end": 1782378
+    },
+    {
+      "filename": "/crt0.s",
+      "start": 1782378,
+      "end": 1782849
+    },
+    {
+      "filename": "/include/stdio.h",
+      "start": 1782849,
+      "end": 1789848
+    },
+    {
+      "filename": "/include/stdlib.h",
+      "start": 1789848,
+      "end": 1796796
+    },
+    {
+      "filename": "/include/string.h",
+      "start": 1796796,
+      "end": 1802474
+    },
+    {
+      "filename": "/include/ctype.h",
+      "start": 1802474,
+      "end": 1806959
+    },
+    {
+      "filename": "/include/stddef.h",
+      "start": 1806959,
+      "end": 1809996
+    },
+    {
+      "filename": "/include/stdarg.h",
+      "start": 1809996,
+      "end": 1812909
+    },
+    {
+      "filename": "/include/stdbool.h",
+      "start": 1812909,
+      "end": 1815415
+    },
+    {
+      "filename": "/include/stdint.h",
+      "start": 1815415,
+      "end": 1821135
+    },
+    {
+      "filename": "/include/limits.h",
+      "start": 1821135,
+      "end": 1824870
+    },
+    {
+      "filename": "/include/errno.h",
+      "start": 1824870,
+      "end": 1830724
+    },
+    {
+      "filename": "/include/assert.h",
+      "start": 1830724,
+      "end": 1833726
+    },
+    {
+      "filename": "/include/time.h",
+      "start": 1833726,
+      "end": 1839060
+    },
+    {
+      "filename": "/include/setjmp.h",
+      "start": 1839060,
+      "end": 1841908
+    },
+    {
+      "filename": "/include/signal.h",
+      "start": 1841908,
+      "end": 1845253
+    },
+    {
+      "filename": "/include/unistd.h",
+      "start": 1845253,
+      "end": 1849562
+    },
+    {
+      "filename": "/include/conio.h",
+      "start": 1849562,
+      "end": 1859668
+    },
+    {
+      "filename": "/include/target.h",
+      "start": 1859668,
+      "end": 1862758
+    },
+    {
+      "filename": "/asminc/longbranch.mac",
+      "start": 1862758,
+      "end": 1865390
+    },
+    {
+      "filename": "/asminc/generic.mac",
+      "start": 1865390,
+      "end": 1866327
+    },
+    {
+      "filename": "/asminc/module.mac",
+      "start": 1866327,
+      "end": 1866605
+    },
+    {
+      "filename": "/asminc/cpu.mac",
+      "start": 1866605,
+      "end": 1866822
+    }
+  ],
+  "remote_package_size": 1866822,
+  "package_uuid": "bbc-micro-fs-1756070756"
+}

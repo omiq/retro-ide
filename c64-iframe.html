@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C64 Emulator (Iframe)</title>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            font-family: monospace;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            border: 1px solid #333;
+            cursor: pointer;
+            width: 100%;
+            height: 100vh;
+            outline: none;
+            display: block;
+            margin: 0 auto;
+        }
+        
+        #canvas:focus {
+            border: 2px solid #4CAF50;
+        }
+        
+        .status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            max-width: 300px;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="status" id="status">Loading C64 emulator...</div>
+    <canvas id="canvas" width="800" height="501" tabindex="0"></canvas>
+
+    <script>
+        // This iframe has its own isolated window object
+        // No conflicts with the main application's event handling
+        
+        const canvas = document.getElementById('canvas');
+        const status = document.getElementById('status');
+        
+        let emulatorReady = false;
+        let lastCompiledProgram = null;
+        let pauseResumeSupported = false;
+        
+        function updateStatus(message) {
+            status.textContent = message;
+            console.log("C64 iframe:", message);
+        }
+        
+        // Function to test if pause/resume functionality actually works
+        function testPauseResumeCapability() {
+            console.log("C64 iframe: Testing pause/resume capability...");
+            
+            if (!window.h) {
+                console.log("C64 iframe: window.h not available for capability test");
+                pauseResumeSupported = false;
+                return false;
+            }
+            
+            // Check if the functions exist
+            const hasPause = typeof window.h.pauseMainLoop === 'function';
+            const hasResume = typeof window.h.resumeMainLoop === 'function';
+            
+            console.log("C64 iframe: pauseMainLoop exists:", hasPause);
+            console.log("C64 iframe: resumeMainLoop exists:", hasResume);
+            
+            if (!hasPause || !hasResume) {
+                console.log("C64 iframe: Pause/resume functions not available");
+                pauseResumeSupported = false;
+                return false;
+            }
+            
+            // Try to test the functions by calling them and checking for errors
+            try {
+                console.log("C64 iframe: Testing pause function...");
+                window.h.pauseMainLoop();
+                console.log("C64 iframe: Pause function called successfully");
+                
+                // Wait a moment, then test resume
+                setTimeout(() => {
+                    try {
+                        console.log("C64 iframe: Testing resume function...");
+                        window.h.resumeMainLoop();
+                        console.log("C64 iframe: Resume function called successfully");
+                        
+                        // If we get here without errors, the functions work
+                        pauseResumeSupported = true;
+                        console.log("C64 iframe: Pause/resume capability confirmed");
+                        
+                        // Notify parent window of capability
+                        if (window.parent) {
+                            window.parent.postMessage({
+                                type: 'emulator_capabilities',
+                                capabilities: {
+                                    pauseResume: true
+                                }
+                            }, '*');
+                            console.log("C64 iframe: Sent capability info to parent");
+                        }
+                        
+                    } catch (e) {
+                        console.log("C64 iframe: Resume function failed:", e);
+                        pauseResumeSupported = false;
+                        
+                        // Notify parent window that pause/resume is not supported
+                        if (window.parent) {
+                            window.parent.postMessage({
+                                type: 'emulator_capabilities',
+                                capabilities: {
+                                    pauseResume: false
+                                }
+                            }, '*');
+                        }
+                    }
+                }, 100);
+                
+            } catch (e) {
+                console.log("C64 iframe: Pause function failed:", e);
+                pauseResumeSupported = false;
+                
+                // Notify parent window that pause/resume is not supported
+                if (window.parent) {
+                    window.parent.postMessage({
+                        type: 'emulator_capabilities',
+                        capabilities: {
+                            pauseResume: false
+                        }
+                    }, '*');
+                }
+            }
+            
+            return pauseResumeSupported;
+        }
+        
+        // Core function to load program into emulator
+        function loadProgramIntoEmulator(programData) {
+            if (!emulatorReady || !programData) {
+                updateStatus("Emulator not ready or no program available");
+                return;
+            }
+            
+            updateStatus("Loading program into emulator...");
+            
+            try {
+                // Use the same drop event approach as the main application
+                if (window.h && typeof window.h.__sapp_emsc_begin_drop === 'function') {
+                    console.log("🎯 Loading program via drop function...");
+                    
+                    // Create a File object
+                    const file = new File([programData], "main.prg", { type: "application/octet-stream" });
+                    
+                    // Create a DataTransfer and add the File
+                    const dt = new DataTransfer();
+                    dt.items.add(file);
+                    
+                    // Create a synthetic drop event
+                    const dropEvent = new DragEvent("drop", {
+                        dataTransfer: dt,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    
+                    // Dispatch the event to the canvas
+                    canvas.dispatchEvent(dropEvent);
+                    console.log("✅ Drop event dispatched to canvas");
+                    
+                    // Wait for program to load, then check if it's running
+                    setTimeout(() => {
+                        console.log("🎯 Checking if program loaded successfully...");
+                        updateStatus("Program loaded via drop event: " + programData.length + " bytes");
+                        
+                        // Try to trigger execution if needed
+                        if (typeof window.h.__sapp_emsc_begin_drop === 'function') {
+                            try {
+                                window.h.__sapp_emsc_begin_drop();
+                                console.log("✅ Triggered program execution");
+                            } catch (e) {
+                                console.log("⚠️ Could not trigger execution:", e);
+                            }
+                        }
+                        
+                        // Also try to type "RUN" command to execute the program
+                        setTimeout(() => {
+                            console.log("🎯 Attempting to type RUN command...");
+                            try {
+                                // Type "RUN" followed by Enter
+                                const runCommand = "RUN\r";
+                                for (let i = 0; i < runCommand.length; i++) {
+                                    const charCode = runCommand.charCodeAt(i);
+                                    if (window.h && typeof window.h._ === 'function') {
+                                        window.h._(canvas, charCode, 2, 0); // keydown
+                                        window.h._(canvas, charCode, 3, 0); // keyup
+                                    }
+                                }
+                                console.log("✅ Typed RUN command");
+                                updateStatus("Program loaded and RUN command sent");
+                            } catch (e) {
+                                console.log("⚠️ Could not type RUN command:", e);
+                            }
+                        }, 500);
+                    }, 1000);
+                    
+                } else if (window.h && typeof window.h.loadProgram === 'function') {
+                    window.h.loadProgram(programData);
+                    updateStatus("Program loaded: " + programData.length + " bytes");
+                } else if (window.h && typeof window.h.loadROM === 'function') {
+                    window.h.loadROM(programData);
+                    updateStatus("ROM loaded: " + programData.length + " bytes");
+                } else {
+                    updateStatus("No program loading method found");
+                    console.log("❌ No drop function or loadProgram/loadROM available");
+                }
+            } catch (e) {
+                updateStatus("Error loading program: " + e.message);
+                console.error("Error loading program:", e);
+            }
+        }
+        
+        // Function to load any queued program when emulator becomes ready
+        function loadQueuedProgram() {
+            if (lastCompiledProgram && emulatorReady) {
+                console.log("C64 iframe: Loading queued program now that emulator is ready");
+                setTimeout(() => loadProgramIntoEmulator(lastCompiledProgram), 500);
+            }
+        }
+
+        // Initialize C64 emulator in isolated environment
+        function initC64Emulator() {
+            updateStatus("Loading C64 script...");
+            
+            // Load the C64 script
+            const script = document.createElement('script');
+            script.src = 'res/c64.js';
+            script.onload = function() {
+                updateStatus("C64 script loaded");
+                
+                // Wait for the emulator to initialize
+                setTimeout(function() {
+                    if (window.h) {
+                        updateStatus("C64 emulator initialized");
+                        
+                        // Connect canvas to emulator
+                        window.h.canvas = canvas;
+                        window.canvas = canvas;
+                        updateStatus("Canvas connected to C64 emulator");
+                        
+                        // Try to start the emulator
+                        if (typeof window.h.oc === 'function') {
+                            try {
+                                window.h.oc();
+                                emulatorReady = true;
+                                updateStatus("C64 emulator started - Ready to load programs");
+                                
+                                // Test pause/resume capability
+                                setTimeout(() => {
+                                    testPauseResumeCapability();
+                                }, 500);
+                                
+                                // Check for latest compiled program and load any queued program
+                                setTimeout(() => {
+                                    window.checkForProgramInURL();
+                                    loadQueuedProgram();
+                                }, 1000);
+                                
+                            } catch (e) {
+                                updateStatus("Error starting emulator: " + e.message);
+                                console.error("C64 iframe: Error starting emulator:", e);
+                            }
+                        } else {
+                            // List all available functions in window.h for debugging
+                            console.log("C64 iframe: window.h object:", window.h);
+                            console.log("C64 iframe: Available functions in window.h:");
+                            for (let key in window.h) {
+                                if (typeof window.h[key] === 'function') {
+                                    console.log("  - " + key + " (function)");
+                                } else {
+                                    console.log("  - " + key + " (" + typeof window.h[key] + ")");
+                                }
+                            }
+                            
+                            // Check if emulator is already running
+                            if (window.h.calledRun) {
+                                console.log("C64 iframe: Emulator already running (calledRun = true)");
+                                emulatorReady = true;
+                                updateStatus("C64 emulator already running - Ready to load programs");
+                                
+                                // Test pause/resume capability
+                                setTimeout(() => {
+                                    testPauseResumeCapability();
+                                }, 500);
+                                
+                                setTimeout(() => {
+                                    window.checkForProgramInURL();
+                                    loadQueuedProgram();
+                                }, 1000);
+                            } else {
+                                // Try alternative start functions
+                                if (typeof window.h._main === 'function') {
+                                    try {
+                                        window.h._main();
+                                        emulatorReady = true;
+                                        updateStatus("C64 emulator started via _main - Ready to load programs");
+                                        
+                                        // Test pause/resume capability
+                                        setTimeout(() => {
+                                            testPauseResumeCapability();
+                                        }, 500);
+                                        
+                                        setTimeout(() => {
+                                            window.checkForProgramInURL();
+                                            loadQueuedProgram();
+                                        }, 1000);
+                                    } catch (e) {
+                                        updateStatus("Error starting emulator via _main: " + e.message);
+                                        console.error("C64 iframe: Error starting emulator via _main:", e);
+                                    }
+                                } else if (typeof window.h.resumeMainLoop === 'function') {
+                                    try {
+                                        window.h.resumeMainLoop();
+                                        emulatorReady = true;
+                                        updateStatus("C64 emulator started via resumeMainLoop - Ready to load programs");
+                                        
+                                        // Test pause/resume capability
+                                        setTimeout(() => {
+                                            testPauseResumeCapability();
+                                        }, 500);
+                                        
+                                        setTimeout(() => window.checkForProgramInURL(), 1000);
+                                    } catch (e) {
+                                        updateStatus("Error starting emulator via resumeMainLoop: " + e.message);
+                                        console.error("C64 iframe: Error starting emulator via resumeMainLoop:", e);
+                                    }
+                                } else if (typeof window.h.c64_run === 'function') {
+                                    try {
+                                        window.h.c64_run();
+                                        emulatorReady = true;
+                                        updateStatus("C64 emulator started via c64_run - Ready to load programs");
+                                        
+                                        // Test pause/resume capability
+                                        setTimeout(() => {
+                                            testPauseResumeCapability();
+                                        }, 500);
+                                        
+                                        setTimeout(() => window.checkForProgramInURL(), 1000);
+                                    } catch (e) {
+                                        updateStatus("Error starting emulator via c64_run: " + e.message);
+                                        console.error("C64 iframe: Error starting emulator via c64_run:", e);
+                                    }
+                                } else if (typeof window.h.run === 'function') {
+                                    try {
+                                        window.h.run();
+                                        emulatorReady = true;
+                                        updateStatus("C64 emulator started via run - Ready to load programs");
+                                        
+                                        // Test pause/resume capability
+                                        setTimeout(() => {
+                                            testPauseResumeCapability();
+                                        }, 500);
+                                        
+                                        setTimeout(() => window.checkForProgramInURL(), 1000);
+                                    } catch (e) {
+                                        updateStatus("Error starting emulator via run: " + e.message);
+                                        console.error("C64 iframe: Error starting emulator via run:", e);
+                                    }
+                                } else if (typeof window.h.start === 'function') {
+                                    try {
+                                        window.h.start();
+                                        emulatorReady = true;
+                                        updateStatus("C64 emulator started via start - Ready to load programs");
+                                        
+                                        // Test pause/resume capability
+                                        setTimeout(() => {
+                                            testPauseResumeCapability();
+                                        }, 500);
+                                        
+                                        setTimeout(() => window.checkForProgramInURL(), 1000);
+                                    } catch (e) {
+                                        updateStatus("Error starting emulator via start: " + e.message);
+                                        console.error("C64 iframe: Error starting emulator via start:", e);
+                                    }
+                                } else {
+                                    // If no start function found, assume emulator is already running
+                                    console.log("C64 iframe: No explicit start function found, assuming emulator is running");
+                                    emulatorReady = true;
+                                    updateStatus("C64 emulator ready (assumed running) - Ready to load programs");
+                                    
+                                    // Test pause/resume capability
+                                    setTimeout(() => {
+                                        testPauseResumeCapability();
+                                    }, 500);
+                                    
+                                    setTimeout(() => {
+                                        window.checkForProgramInURL();
+                                        loadQueuedProgram();
+                                    }, 1000);
+                                }
+                            }
+                        }
+                        
+                        // Draw initial test pattern only if emulator didn't start
+                        if (!emulatorReady) {
+                            const ctx = canvas.getContext('2d');
+                            if (ctx) {
+                                ctx.fillStyle = 'black';
+                                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                                ctx.fillStyle = 'white';
+                                ctx.font = '16px monospace';
+                                ctx.fillText('C64 Emulator Ready', 10, 30);
+                                ctx.fillText('Click to focus and test input', 10, 50);
+                                ctx.fillText('This is an isolated iframe environment', 10, 70);
+                            }
+                        }
+                        
+                    } else {
+                        updateStatus("C64 emulator not initialized - window.h not found");
+                        console.error("C64 iframe: window.h not found after script load");
+                        
+                        // Draw error message
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) {
+                            ctx.fillStyle = 'black';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            ctx.fillStyle = 'red';
+                            ctx.font = '16px monospace';
+                            ctx.fillText('C64 Emulator Failed to Load', 10, 30);
+                            ctx.fillStyle = 'white';
+                            ctx.fillText('Check console for errors', 10, 50);
+                            ctx.fillText('window.h not found', 10, 70);
+                        }
+                    }
+                }, 2000); // Increased timeout to 2 seconds
+            };
+            
+            script.onerror = function() {
+                updateStatus("Failed to load C64 script");
+                console.error("C64 iframe: Failed to load res/c64.js");
+                
+                // Draw error message
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.fillStyle = 'black';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = 'red';
+                    ctx.font = '16px monospace';
+                    ctx.fillText('Failed to load C64 script', 10, 30);
+                    ctx.fillStyle = 'white';
+                    ctx.fillText('Check if res/c64.js exists', 10, 50);
+                }
+            };
+            
+            document.head.appendChild(script);
+        }
+        
+        // Add keyboard event listeners directly to canvas
+        canvas.addEventListener('keydown', function(event) {
+            updateStatus("KeyDown: " + event.key + " (keyCode: " + event.keyCode + ")");
+            console.log("C64 iframe keydown:", event.key, event.keyCode);
+            
+            // Prevent default browser behavior for special keys that might interfere
+            if (event.key === ' ' || event.key === 'Backspace' || event.key === 'Tab' || 
+                event.key === 'ArrowUp' || event.key === 'ArrowDown' || 
+                event.key === 'ArrowLeft' || event.key === 'ArrowRight' ||
+                event.key === 'Enter' || event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            
+            // Try to send to C64 emulator using the correct Emscripten functions
+            if (window.h && typeof window.h._ === 'function') {
+                try {
+                    window.h._(canvas, event.keyCode, 2, 0);
+                    console.log("C64 iframe: Sent keydown via _ function");
+                } catch (e) {
+                    console.log("C64 iframe: Error sending keydown:", e);
+                }
+            }
+            
+            // Also try the alternative keyboard input function
+            if (window.h && typeof window.h.setKeyInput === 'function') {
+                try {
+                    window.h.setKeyInput(event.keyCode, event.keyCode, 1); // 1 for keydown
+                    console.log("C64 iframe: Sent keydown via setKeyInput");
+                } catch (e) {
+                    console.log("C64 iframe: Error sending keydown via setKeyInput:", e);
+                }
+            }
+        });
+        
+        canvas.addEventListener('keyup', function(event) {
+            updateStatus("KeyUp: " + event.key + " (keyCode: " + event.keyCode + ")");
+            console.log("C64 iframe keyup:", event.key, event.keyCode);
+            
+            // Prevent default browser behavior for special keys that might interfere
+            if (event.key === ' ' || event.key === 'Backspace' || event.key === 'Tab' || 
+                event.key === 'ArrowUp' || event.key === 'ArrowDown' || 
+                event.key === 'ArrowLeft' || event.key === 'ArrowRight' ||
+                event.key === 'Enter' || event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            
+            // Try to send to C64 emulator using the correct Emscripten functions
+            if (window.h && typeof window.h.Z === 'function') {
+                try {
+                    window.h.Z(canvas, event.keyCode, 3, 0);
+                    console.log("C64 iframe: Sent keyup via Z function");
+                } catch (e) {
+                    console.log("C64 iframe: Error sending keyup:", e);
+                }
+            }
+            
+            // Also try the alternative keyboard input function
+            if (window.h && typeof window.h.setKeyInput === 'function') {
+                try {
+                    window.h.setKeyInput(event.keyCode, event.keyCode, 2); // 2 for keyup
+                    console.log("C64 iframe: Sent keyup via setKeyInput");
+                } catch (e) {
+                    console.log("C64 iframe: Error sending keyup via setKeyInput:", e);
+                }
+            }
+        });
+        
+        // Add click event to focus canvas
+        canvas.addEventListener('click', function(event) {
+            canvas.focus();
+            updateStatus("Canvas focused - keyboard input enabled");
+        });
+        
+        // Also focus on mousedown to ensure immediate focus
+        canvas.addEventListener('mousedown', function(event) {
+            canvas.focus();
+        });
+        
+        // Add global keyboard event listeners to see if events are reaching the iframe
+        document.addEventListener('keydown', function(event) {
+            console.log("C64 iframe document keydown:", event.key, event.keyCode);
+        });
+        
+        document.addEventListener('keyup', function(event) {
+            console.log("C64 iframe document keyup:", event.key, event.keyCode);
+        });
+        
+        // Add focus/blur events to debug focus state
+        canvas.addEventListener('focus', function(event) {
+            console.log("C64 iframe canvas focused");
+            updateStatus("Canvas focused - ready for keyboard input");
+        });
+        
+        canvas.addEventListener('blur', function(event) {
+            console.log("C64 iframe canvas blurred");
+            updateStatus("Canvas blurred - keyboard input disabled");
+        });
+        
+        // Make sure the document can receive focus
+        document.addEventListener('click', function(event) {
+            if (event.target === document.body) {
+                canvas.focus();
+                console.log("C64 iframe: Clicked on body, focusing canvas");
+            }
+        });
+        
+        // Listen for postMessage from parent window
+        window.addEventListener('message', function(event) {
+            console.log("C64 iframe: Received message from parent:", event.data);
+            
+            if (event.data && event.data.type === 'compiled_program' && event.data.program) {
+                console.log("C64 iframe: Received compiled program via postMessage:", event.data.program.length, "bytes");
+                
+                // Store the program
+                lastCompiledProgram = event.data.program;
+                updateStatus("Program received via postMessage: " + event.data.program.length + " bytes");
+                
+                // Auto-load if requested
+                if (event.data.autoLoad) {
+                    if (emulatorReady) {
+                        console.log("C64 iframe: Emulator ready, auto-loading program from postMessage...");
+                        setTimeout(() => loadProgramIntoEmulator(event.data.program), 500);
+                    } else {
+                        console.log("C64 iframe: Emulator not ready yet, will auto-load when ready");
+                        // The program will be loaded when emulatorReady becomes true
+                    }
+                }
+            } else if (event.data && event.data.type) {
+                // Handle control commands
+                switch (event.data.type) {
+                    case 'reset':
+                        console.log("C64 iframe: Received reset command");
+                        updateStatus("Resetting C64 emulator...");
+                        // For reset, reload the last program if available
+                        if (lastCompiledProgram && emulatorReady) {
+                            console.log("C64 iframe: Reloading program for reset");
+                            setTimeout(() => loadProgramIntoEmulator(lastCompiledProgram), 100);
+                        } else {
+                            console.log("C64 iframe: No program to reload for reset");
+                            updateStatus("No program available to reset");
+                        }
+                        break;
+                        
+                    case 'pause':
+                        console.log("C64 iframe: Received pause command");
+                        updateStatus("Pausing C64 emulator...");
+                        
+                        if (pauseResumeSupported && window.h && typeof window.h.pauseMainLoop === 'function') {
+                            try {
+                                window.h.pauseMainLoop();
+                                console.log("C64 iframe: Emulator paused successfully");
+                                updateStatus("C64 emulator paused");
+                            } catch (e) {
+                                console.log("C64 iframe: Error pausing emulator:", e);
+                                updateStatus("Error pausing emulator: " + e.message);
+                            }
+                        } else {
+                            console.log("C64 iframe: Pause not supported or function not available");
+                            updateStatus("Pause not supported by this emulator");
+                        }
+                        break;
+                        
+                    case 'resume':
+                        console.log("C64 iframe: Received resume command");
+                        updateStatus("Resuming C64 emulator...");
+                        
+                        if (pauseResumeSupported && window.h && typeof window.h.resumeMainLoop === 'function') {
+                            try {
+                                window.h.resumeMainLoop();
+                                console.log("C64 iframe: Emulator resumed successfully");
+                                updateStatus("C64 emulator resumed");
+                            } catch (e) {
+                                console.log("C64 iframe: Error resuming emulator:", e);
+                                updateStatus("Error resuming emulator: " + e.message);
+                            }
+                        } else {
+                            console.log("C64 iframe: Resume not supported or function not available");
+                            updateStatus("Resume not supported by this emulator");
+                        }
+                        break;
+                        
+                    default:
+                        console.log("C64 iframe: Unknown message type:", event.data.type);
+                }
+            }
+        });
+        
+        // Global function that can be called from main application
+        window.sendCompiledProgramToIframe = function(programData) {
+            if (programData && programData.length > 0) {
+                lastCompiledProgram = programData;
+                updateStatus("Received program via global function: " + programData.length + " bytes");
+                
+                if (emulatorReady) {
+                    loadProgramIntoEmulator(programData);
+                }
+            } else {
+                updateStatus("Invalid program data received");
+            }
+        };
+        
+        // Global function to get program data from main app
+        window.getCompiledProgramFromMainApp = function() {
+            console.log("C64 iframe: Attempting to get program from main app...");
+            
+            // Try to access the main application's worker
+            if (window.parent && window.parent.worker && window.parent.worker.store && window.parent.worker.store.workfs) {
+                if (window.parent.worker.store.workfs['main']) {
+                    const mainFile = window.parent.worker.store.workfs['main'];
+                    lastCompiledProgram = mainFile.data;
+                    updateStatus("Got program from main app: " + mainFile.data.length + " bytes");
+                    
+                    if (emulatorReady) {
+                        loadProgramIntoEmulator(mainFile.data);
+                    }
+                    return true;
+                }
+            }
+            
+            updateStatus("Could not get program from main app");
+            return false;
+        };
+        
+        // Initialize when page loads
+        window.addEventListener('load', function() {
+            initC64Emulator();
+            
+            // Check for program data in URL parameters
+            checkForProgramInURL();
+        });
+        
+        function checkForProgramInURL() {
+            console.log("C64 iframe: Checking for program in URL parameters...");
+            console.log("C64 iframe: Current URL:", window.location.href);
+            console.log("C64 iframe: Search params:", window.location.search);
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            const programData = urlParams.get('program');
+            const programHex = urlParams.get('hex');
+            const gzipData = urlParams.get('gzip');
+            
+            console.log("C64 iframe: program param:", programData ? "found (" + programData.length + " chars)" : "not found");
+            console.log("C64 iframe: hex param:", programHex ? "found (" + programHex.length + " chars)" : "not found");
+            console.log("C64 iframe: gzip param:", gzipData ? "found (" + gzipData.length + " chars)" : "not found");
+            
+            if (gzipData) {
+                try {
+                    console.log("C64 iframe: Attempting to decompress gzip program data...");
+                    
+                    // Convert hex string back to Uint8Array
+                    const compressedBytes = new Uint8Array(gzipData.length / 2);
+                    for (let i = 0; i < gzipData.length; i += 2) {
+                        compressedBytes[i / 2] = parseInt(gzipData.substr(i, 2), 16);
+                    }
+                    
+                    console.log("C64 iframe: Compressed data size:", compressedBytes.length, "bytes");
+                    
+                    // Decompress using pako (if available) or fallback
+                    let programArray;
+                    if (typeof pako !== 'undefined') {
+                        programArray = pako.inflate(compressedBytes);
+                        console.log("C64 iframe: Decompressed to:", programArray.length, "bytes");
+                    } else {
+                        // Fallback: try to use browser's built-in decompression
+                        console.log("C64 iframe: pako not available, trying browser decompression...");
+                        // For now, just use the compressed data as-is
+                        programArray = compressedBytes;
+                    }
+                    
+                    console.log("C64 iframe: Found program in URL (gzip): " + programArray.length + " bytes");
+                    console.log("C64 iframe: First 16 bytes:", Array.from(programArray.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    
+                    lastCompiledProgram = programArray;
+                    updateStatus("Program loaded from URL (gzip): " + programArray.length + " bytes");
+                    
+                    // Auto-load when emulator is ready
+                    if (emulatorReady) {
+                        console.log("C64 iframe: Emulator ready, auto-loading program...");
+                        setTimeout(() => loadProgramIntoEmulator(programArray), 500);
+                    } else {
+                        console.log("C64 iframe: Emulator not ready yet, will auto-load when ready");
+                    }
+                    
+                } catch (e) {
+                    console.error("C64 iframe: Error decompressing gzip program data:", e);
+                    updateStatus("Error decompressing program from URL: " + e.message);
+                }
+            } else if (programData) {
+                try {
+                    console.log("C64 iframe: Attempting to decode base64 program data...");
+                    // Try to decode base64 program data
+                    const binaryData = atob(programData);
+                    console.log("C64 iframe: Base64 decoded to binary data:", binaryData.length, "bytes");
+                    
+                    const programArray = new Uint8Array(binaryData.length);
+                    for (let i = 0; i < binaryData.length; i++) {
+                        programArray[i] = binaryData.charCodeAt(i);
+                    }
+                    
+                    console.log("C64 iframe: Found program in URL (base64): " + programArray.length + " bytes");
+                    console.log("C64 iframe: First 16 bytes:", Array.from(programArray.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    
+                    lastCompiledProgram = programArray;
+                    updateStatus("Program loaded from URL: " + programArray.length + " bytes");
+                    
+                    // Auto-load when emulator is ready
+                    if (emulatorReady) {
+                        console.log("C64 iframe: Emulator ready, auto-loading program...");
+                        setTimeout(() => loadProgramIntoEmulator(programArray), 500);
+                    } else {
+                        console.log("C64 iframe: Emulator not ready yet, will auto-load when ready");
+                    }
+                    
+                } catch (e) {
+                    console.error("C64 iframe: Error decoding base64 program data:", e);
+                    updateStatus("Error decoding program from URL: " + e.message);
+                }
+            } else if (programHex) {
+                try {
+                    console.log("C64 iframe: Attempting to parse hex program data...");
+                    // Parse hex string from URL
+                    const hexBytes = programHex.trim().split(/\s+/);
+                    console.log("C64 iframe: Hex bytes array:", hexBytes.length, "bytes");
+                    
+                    const programArray = new Uint8Array(hexBytes.map(byte => parseInt(byte, 16)));
+                    
+                    console.log("C64 iframe: Found program in URL (hex): " + programArray.length + " bytes");
+                    console.log("C64 iframe: First 16 bytes:", Array.from(programArray.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    
+                    lastCompiledProgram = programArray;
+                    updateStatus("Program loaded from URL (hex): " + programArray.length + " bytes");
+                    
+                    // Auto-load when emulator is ready
+                    if (emulatorReady) {
+                        console.log("C64 iframe: Emulator ready, auto-loading program...");
+                        setTimeout(() => loadProgramIntoEmulator(programArray), 500);
+                    } else {
+                        console.log("C64 iframe: Emulator not ready yet, will auto-load when ready");
+                    }
+                    
+                } catch (e) {
+                    console.error("C64 iframe: Error parsing hex program data:", e);
+                    updateStatus("Error parsing hex program from URL: " + e.message);
+                }
+            } else {
+                console.log("C64 iframe: No program parameters found in URL");
+            }
+        }
+    </script>
+</body>
+</html> 
