@@ -101,6 +101,7 @@ class BBCMicroPlatform {
     getPresets() {
         return [
             { id: 'bbc_hello.bas', name: 'Hello World (BASIC)' },
+            { id: 'bbc_font.bas', name: 'Custom UDC Font (BASIC)' },
             { id: 'bbc_labels.bas', name: 'Labels and Subroutines (BASIC)' },
             { id: 'bbc_input.bas', name: 'Keyboard Input and Movement (BASIC)' },
             { id: 'bbc_textformat.bas', name: 'Text Formatting (BASIC)' },
