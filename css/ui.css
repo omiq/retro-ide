@@ -630,7 +630,8 @@ div.asset_toolbar {
   font-family: Verdana, Geneva, sans-serif;
 }
 .transcript-bottom {  
-  background-color: #fff;
+  background-color: #000000;
+  color: #00ff00;
   width: 100%;
 }
 .transcript-split {  
@@ -644,6 +645,7 @@ div.asset_toolbar {
   line-height: 1.5em;
   min-height: 1em;
   white-space: pre-wrap;
+  background-color: #000000;
 }
 .transcript-fanfold > .transcript-line {
   min-height: 1.5em;
@@ -657,8 +659,10 @@ div.asset_toolbar {
 .transcript-style-2 {
   white-space: pre-wrap;       /* css-3 */
   font-family: "Andale Mono", "Menlo", "Lucida Console", monospace;
+  color: green;
   line-height: 1em;
   min-height: 0;
+  background-color: #000000;
 }
 .transcript-style-4 {
   font-weight: bold;
@@ -667,7 +671,7 @@ div.asset_toolbar {
   font-weight: 600;
   text-transform: uppercase;
   color: #6666ff;
-  background-color: #eeeeff;
+  background-color: #DDD;
   padding: 0.25em;
   padding-left: 0.5em;
   padding-right: 0.5em;
@@ -686,11 +690,13 @@ div.asset_toolbar {
 .transcript-input {
   font-weight: 600;
   text-transform: uppercase;
-  color: #6666ff;
-  background-color: #eeeeff;
+  color: #green;
+  background-color: #000000;
   margin:1%;
   width:100%;
   max-width:25em;
+  border: 1px solid #004400;
+  outline: none;
 }
 .transcript-input-char {
   max-width:5em;
