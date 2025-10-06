@@ -5,6 +5,7 @@ import { RasterVideo, AnimationTimer } from "../common/emu";
 
 const C64_PRESETS : Preset[] = [
   {id:'helloc.c', name:'Hello World', category:'C Tutorial'},
+  {id:'petscii.c', name:'PETSCII Symbols'},
   {id:'demo.c', name:'Scrolling Text and Music Demo'},
   {id:'wordy.c', name:'Word Game'},
   {id:'adventure.c', name:'Text Adventure'},

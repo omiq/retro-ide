@@ -4,6 +4,7 @@ const c64_1 = require("../machine/c64");
 const emu_1 = require("../common/emu");
 const C64_PRESETS = [
     { id: 'helloc.c', name: 'Hello World', category: 'C Tutorial' },
+    { id: 'petscii.c', name: 'PETSCII Symbols' },
     { id: 'demo.c', name: 'Scrolling Text and Music Demo' },
     { id: 'wordy.c', name: 'Word Game' },
     { id: 'adventure.c', name: 'Text Adventure' },
