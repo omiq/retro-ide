@@ -117,7 +117,6 @@ const BASIC_PRESETS = [
     { id: 'sinewave.bas', name: 'sinewave' },
     { id: 'slalom.bas', name: 'slalom' },
     { id: 'slots.bas', name: 'slots' },
-    { id: 'splat.bas', name: 'splat' },
     { id: 'stars.bas', name: 'stars' },
     { id: 'startrader.bas', name: 'startrader' },
     { id: 'startrek.bas', name: 'startrek' },
