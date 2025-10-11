@@ -56,7 +56,6 @@ const BASIC_PRESETS = [
     { id: 'change.bas', name: 'change' },
     { id: 'checkers.bas', name: 'checkers' },
     { id: 'chemist.bas', name: 'chemist' },
-    { id: 'chief.bas', name: 'chief' },
     { id: 'chomp.bas', name: 'chomp' },
     { id: 'civilwar.bas', name: 'civilwar' },
     { id: 'combat.bas', name: 'combat' },
