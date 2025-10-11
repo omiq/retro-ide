@@ -18,7 +18,6 @@ const C64_PRESETS = [
     { id: 'trek64.bas', name: 'Star Trek (BASIC)' },
     { id: 'controlcodes.bas', name: 'Control Codes Demo (BASIC)' },
     { id: 'hello.acme', name: 'Hello World (ACME)', category: 'Assembly (ACME)' },
-    { id: 'hello.s', name: 'Hello World (cc65)', category: 'Assembly (cc65)' },
     { id: 'screen_ram.c', name: 'Screen RAM', category: '8-bit Workshop Demos' },
     { id: 'siegegame.c', name: 'Siege Game' },
     { id: 'joymove.c', name: 'Sprite Movement' },
@@ -390,8 +389,6 @@ class C64ChipsPlatform {
         if (filename.toLowerCase().endsWith(".bas"))
             return "c64basic";
         if (filename.endsWith(".c"))
-            return "cc65";
-        if (filename.endsWith(".s"))
             return "cc65";
         if (filename.endsWith(".dasm"))
             return "dasm";
