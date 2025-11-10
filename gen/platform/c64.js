@@ -9,6 +9,7 @@ const C64_PRESETS = [
     { id: 'game.bas', name: 'Number Game (BASIC)' },
     { id: 'labels.bas', name: 'Label Demo (BASIC)' },
     { id: 'cards.bas', name: 'Card Games (BASIC)' },
+    { id: 'pong.bas', name: 'Pong Style Game (BASIC)' },
     { id: 'lander.bas', name: 'Space Lander Game (BASIC)' },
     { id: 'adventure.bas', name: 'Adventure Game (BASIC)' },
     { id: 'trek64.bas', name: 'Star Trek (BASIC)' },
