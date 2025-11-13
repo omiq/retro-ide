@@ -913,6 +913,8 @@ async function setCompileOutput(data: WorkerResult) {
     projectWindows.setErrors(data.errors);
     refreshWindowList(); // to make sure windows are created for showErrorAlert()
     showErrorAlert(data.errors, false);
+    // Track compilation failure
+    gaEvent('compile', 'error', platform_id, data.errors.length.toString());
   } else {
     toolbar.removeClass("has-errors"); // may be added in next callback
     projectWindows.setErrors(null);
@@ -934,6 +936,8 @@ async function setCompileOutput(data: WorkerResult) {
         current_output = rom;
         if (!userPaused) _resume();
         writeOutputROMFile();
+        // Track successful compilation
+        gaEvent('compile', 'success', platform_id, rom.length.toString());
       } catch (e) {
         console.log(e);
         toolbar.addClass("has-errors");
@@ -1884,6 +1888,8 @@ async function startPlatform() {
   replaceURLState();
   installErrorHandler();
   installGAHooks();
+  // Track platform selection
+  gaEvent('platform', 'select', platform_id);
   await platform.start();
   await loadBIOSFromProject();
   await initProject();

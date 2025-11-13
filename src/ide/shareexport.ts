@@ -2,6 +2,7 @@ import { OutputSoundFile, TAPFile } from '../common/audio/CommodoreTape';
 import { byteArrayToString, compressLZG, getBasePlatform, getFilenameForPath, getFilenamePrefix, loadScript } from '../common/util';
 import { alertError, alertInfo, setWaitDialog, setWaitProgress } from './dialogs';
 import { getCurrentEditorFilename, getCurrentMainFilename, getCurrentOutput, getCurrentProject, getPlatformStore, getWorkerParams, platform, platform_id, projectWindows } from './ui';
+import { gaEvent } from './analytics';
 import { saveAs } from "file-saver";
 
 declare var GIF;
@@ -174,6 +175,8 @@ export function _downloadROMImage(e) {
             var prefix = getFilenamePrefix(getCurrentMainFilename());
             console.log("Downloading file:", prefix + dl.extension);
             saveAs(dl.blob, prefix + dl.extension);
+            // Track download
+            gaEvent('download', 'rom', platform_id);
         } else {
             console.log("getDownloadFile() returned null/undefined");
             alertError("No downloadable file available. Make sure you have compiled a program.");
@@ -184,6 +187,8 @@ export function _downloadROMImage(e) {
             || "-" + getBasePlatform(platform_id) + ".bin";
         console.log("Using fallback download, suffix:", suffix);
         saveAs(blob, prefix + suffix);
+        // Track download
+        gaEvent('download', 'rom', platform_id);
     } else {
         alertError(`The "${platform_id}" platform doesn't have downloadable ROMs.`);
     }
@@ -194,6 +199,8 @@ export function _downloadSourceFile(e) {
     if (!text) return false;
     var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     saveAs(blob, getCurrentEditorFilename(), { autoBom: false });
+    // Track download
+    gaEvent('download', 'source', platform_id);
 }
 
 async function newJSZip() {
@@ -210,6 +217,8 @@ export async function _downloadProjectZipFile(e) {
     });
     zip.generateAsync({ type: "blob" }).then((content) => {
         saveAs(content, getCurrentMainFilename() + "-" + getBasePlatform(platform_id) + ".zip");
+        // Track download
+        gaEvent('download', 'zip', platform_id);
     });
 }
 

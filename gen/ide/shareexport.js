@@ -37,6 +37,7 @@ const CommodoreTape_1 = require("../common/audio/CommodoreTape");
 const util_1 = require("../common/util");
 const dialogs_1 = require("./dialogs");
 const ui_1 = require("./ui");
+const analytics_1 = require("./analytics");
 const file_saver_1 = require("file-saver");
 function _shareEmbedLink(e) {
     if ((0, ui_1.getCurrentOutput)() == null) {
@@ -200,6 +201,8 @@ function _downloadROMImage(e) {
             var prefix = (0, util_1.getFilenamePrefix)((0, ui_1.getCurrentMainFilename)());
             console.log("Downloading file:", prefix + dl.extension);
             (0, file_saver_1.saveAs)(dl.blob, prefix + dl.extension);
+            // Track download
+            (0, analytics_1.gaEvent)('download', 'rom', ui_1.platform_id);
         }
         else {
             console.log("getDownloadFile() returned null/undefined");
@@ -212,6 +215,8 @@ function _downloadROMImage(e) {
             || "-" + (0, util_1.getBasePlatform)(ui_1.platform_id) + ".bin";
         console.log("Using fallback download, suffix:", suffix);
         (0, file_saver_1.saveAs)(blob, prefix + suffix);
+        // Track download
+        (0, analytics_1.gaEvent)('download', 'rom', ui_1.platform_id);
     }
     else {
         (0, dialogs_1.alertError)(`The "${ui_1.platform_id}" platform doesn't have downloadable ROMs.`);
@@ -223,6 +228,8 @@ function _downloadSourceFile(e) {
         return false;
     var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     (0, file_saver_1.saveAs)(blob, (0, ui_1.getCurrentEditorFilename)(), { autoBom: false });
+    // Track download
+    (0, analytics_1.gaEvent)('download', 'source', ui_1.platform_id);
 }
 async function newJSZip() {
     let JSZip = (await Promise.resolve().then(() => __importStar(require('jszip')))).default;
@@ -237,6 +244,8 @@ async function _downloadProjectZipFile(e) {
     });
     zip.generateAsync({ type: "blob" }).then((content) => {
         (0, file_saver_1.saveAs)(content, (0, ui_1.getCurrentMainFilename)() + "-" + (0, util_1.getBasePlatform)(ui_1.platform_id) + ".zip");
+        // Track download
+        (0, analytics_1.gaEvent)('download', 'zip', ui_1.platform_id);
     });
 }
 function _downloadSymFile(e) {
