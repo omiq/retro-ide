@@ -48,6 +48,8 @@ interface UIQueryString {
   file0_data? : string;
   file0_type? : string;
   tool?: string;
+  url? : string;  // Load file from external URL
+  filename? : string;  // Optional filename override when using url parameter
 }
 
 /// EXPORTED GLOBALS (TODO: remove)
@@ -60,6 +62,8 @@ export var repo_id : string;		// repository ID (repo)
 export var platform : Platform;		// emulator object
 export var current_project : CodeProject;	// current CodeProject object
 export var projectWindows : ProjectWindows;	// window manager
+var urlLoadedFile : {filename: string, content: string} | null = null;  // Temporary storage for URL-loaded file
+var shouldAutoCompileURL : boolean = false;  // Flag to trigger auto-compile for URL-loaded files
 export var lastDebugState : EmuState;	// last debug state (object)
 
 // private globals
@@ -1893,8 +1897,29 @@ async function startPlatform() {
   await platform.start();
   await loadBIOSFromProject();
   await initProject();
+  
+  // If file was loaded from URL, set it in project now (after initProject)
+  if (urlLoadedFile) {
+    current_project.filedata[urlLoadedFile.filename] = urlLoadedFile.content;
+    current_project.mainPath = urlLoadedFile.filename;
+    qs.file = urlLoadedFile.filename;
+    urlLoadedFile = null; // Clear temporary storage
+  }
+  
   await loadProject(qs.file);
   platform.sourceFileFetch = (path) => current_project.filedata[path];
+  
+  // Force immediate compilation if file was loaded from URL
+  if (shouldAutoCompileURL && current_project && current_project.mainPath) {
+    shouldAutoCompileURL = false; // Reset flag
+    // Small delay to ensure platform is fully ready
+    setTimeout(() => {
+      if (current_project && current_project.mainPath) {
+        console.log("Auto-compiling URL-loaded file:", current_project.mainPath);
+        current_project.sendBuild();
+      }
+    }, 300);
+  }
   
   // Initialize auto-compile state from cookie
   autoCompileEnabled = loadAutoCompileState();
@@ -1960,6 +1985,93 @@ export function setupSplits() {
       if (projectWindows) projectWindows.resize();
     },
   });
+}
+
+async function loadFromURL(url: string) {
+  // Validate platform is set
+  if (!platform_id) {
+    alertError("Platform must be specified when using url parameter. Please add ?platform=XXX to the URL.");
+    return;
+  }
+
+  // Validate URL scheme (only http/https allowed)
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
+      alertError("Only http and https URLs are supported. Invalid URL: " + url);
+      return;
+    }
+  } catch (e) {
+    alertError("Invalid URL format: " + url + ". Please provide a valid http:// or https:// URL.");
+    return;
+  }
+
+  setWaitDialog(true);
+  
+  // Extract filename from URL or use provided filename parameter
+  let filename: string;
+  if (qs.filename) {
+    filename = qs.filename;
+  } else {
+    filename = getFilenameForPath(url);
+    // If no filename found in URL, use a default based on platform
+    if (!filename || filename === url) {
+      const ext = platform_id === 'c64' ? '.bas' : 
+                  platform_id === 'bbc' ? '.bas' :
+                  platform_id === 'vic20' ? '.bas' : '.c';
+      filename = 'loaded' + ext;
+    }
+  }
+
+  console.log("Loading file from URL:", url);
+  console.log("Using filename:", filename);
+
+  getWithBinary(url, async (data) => {
+    try {
+      if (!data) {
+        alertError("Could not load file from URL: " + url + "\n\nPossible reasons:\n- File not found (404)\n- CORS restrictions\n- Network error\n- Invalid URL");
+        setWaitDialog(false);
+        return;
+      }
+
+      // Convert to string if it's binary data (for text files)
+      let fileContent: string;
+      if (data instanceof Uint8Array) {
+        // Try to decode as UTF-8 text
+        try {
+          fileContent = byteArrayToUTF8(data);
+        } catch (e) {
+          alertError("Could not decode file as text. Binary files are not supported in this phase.");
+          setWaitDialog(false);
+          return;
+        }
+      } else {
+        fileContent = data as string;
+      }
+
+      console.log("Loaded " + fileContent.length + " bytes from URL");
+
+      // Store file content temporarily (project not initialized yet)
+      urlLoadedFile = { filename, content: fileContent };
+      shouldAutoCompileURL = true;  // Mark for auto-compilation
+
+      // Clean up URL parameters
+      delete qs.url;
+      delete qs.filename;
+      qs.file = filename;
+      replaceURLState();
+
+      setWaitDialog(false);
+
+      // Continue with normal platform startup
+      await loadAndStartPlatform();
+
+    } catch (e) {
+      console.error("Error loading from URL:", e);
+      alertError("Error loading file from URL: " + url + "\n\n" + e.message);
+      setWaitDialog(false);
+    }
+  }, 'text');
 }
 
 function loadImportedURL(url : string) {
@@ -2074,6 +2186,24 @@ export async function startUI() {
     importProjectFromGithub(qs.githubURL, true);
     return;
   }
+  // Check for url parameter (must be before platform setup)
+  if (qs.url) {
+    // Platform must be explicitly specified for URL loading
+    if (!qs.platform) {
+      alertError("Platform must be specified when using url parameter. Please add ?platform=XXX&url=... to the URL.\n\nExample: ?platform=c64&url=https://example.com/game.bas");
+      return;
+    }
+    getPlatformAndRepo();
+    setupSplits();
+    store_id = repo_id || getBasePlatform(platform_id);
+    if (isEmbed) {
+      store_id = (document.referrer || document.location.href) + store_id;
+    }
+    store = createNewPersistentStore(store_id);
+    await loadFromURL(qs.url);
+    return;
+  }
+  
   getPlatformAndRepo();
   setupSplits();
   // get store ID, repo id or platform id
