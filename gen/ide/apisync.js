@@ -508,17 +508,46 @@ async function _createApiProject() {
                     description: description || undefined,
                     public: isPublic,
                 });
-                (0, dialogs_1.setWaitDialog)(false);
-                (0, dialogs_1.alertInfo)(`Project "${project.title}" created successfully!`);
-                (0, analytics_1.gaEvent)('api', 'project', 'create');
-                // Optionally sync with this project
-                if (confirm("Would you like to sync your current files to this project?")) {
-                    await bindToApiProject(project);
+                // Bind to the new project
+                setCurrentApiProject(project);
+                // Automatically push files to the new project
+                (0, dialogs_1.setWaitProgress)(0.5);
+                const currentProj = (0, ui_1.getCurrentProject)();
+                const files = {};
+                const filetypes = {};
+                // Collect all project source files (exclude bin/ directory - we'll add current compiled output separately)
+                for (const [path, data] of Object.entries(currentProj.filedata)) {
+                    if (data && !path.startsWith('bin/')) {
+                        files[path] = data;
+                        const filetype = determineFiletype(path);
+                        if (filetype) {
+                            filetypes[path] = filetype;
+                        }
+                    }
                 }
+                // Include current compiled output if available (this is the latest build)
+                const output = (0, ui_1.getCurrentOutput)();
+                if (output instanceof Uint8Array) {
+                    const mainFile = (0, ui_1.getCurrentMainFilename)();
+                    if (mainFile) {
+                        const romPath = `bin/${mainFile}.rom`;
+                        files[romPath] = output;
+                        const filetype = determineFiletype(romPath);
+                        if (filetype) {
+                            filetypes[romPath] = filetype;
+                        }
+                    }
+                }
+                (0, dialogs_1.setWaitProgress)(0.8);
+                await api.pushProjectFiles(project.id, files, filetypes);
+                (0, dialogs_1.setWaitDialog)(false);
+                (0, dialogs_1.alertInfo)(`Project "${project.title}" published successfully! Files pushed to server.`);
+                (0, analytics_1.gaEvent)('api', 'project', 'create');
+                (0, analytics_1.gaEvent)('api', 'sync', 'push');
             }
             catch (e) {
                 (0, dialogs_1.setWaitDialog)(false);
-                (0, dialogs_1.alertError)("Failed to create project: " + e.message);
+                (0, dialogs_1.alertError)("Failed to publish project: " + e.message);
                 (0, analytics_1.gaEvent)('api', 'project', 'create_error');
             }
         });

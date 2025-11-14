@@ -556,17 +556,50 @@ export async function _createApiProject() {
           public: isPublic,
         });
         
-        setWaitDialog(false);
-        alertInfo(`Project "${project.title}" created successfully!`);
-        gaEvent('api', 'project', 'create');
+        // Bind to the new project
+        setCurrentApiProject(project);
         
-        // Optionally sync with this project
-        if (confirm("Would you like to sync your current files to this project?")) {
-          await bindToApiProject(project);
+        // Automatically push files to the new project
+        setWaitProgress(0.5);
+        const currentProj = getCurrentProject();
+        const files: { [path: string]: string | Uint8Array } = {};
+        const filetypes: { [path: string]: string } = {};
+
+        // Collect all project source files (exclude bin/ directory - we'll add current compiled output separately)
+        for (const [path, data] of Object.entries(currentProj.filedata)) {
+          if (data && !path.startsWith('bin/')) {
+            files[path] = data;
+            const filetype = determineFiletype(path);
+            if (filetype) {
+              filetypes[path] = filetype;
+            }
+          }
         }
+
+        // Include current compiled output if available (this is the latest build)
+        const output = getCurrentOutput();
+        if (output instanceof Uint8Array) {
+          const mainFile = getCurrentMainFilename();
+          if (mainFile) {
+            const romPath = `bin/${mainFile}.rom`;
+            files[romPath] = output;
+            const filetype = determineFiletype(romPath);
+            if (filetype) {
+              filetypes[romPath] = filetype;
+            }
+          }
+        }
+
+        setWaitProgress(0.8);
+        await api.pushProjectFiles(project.id, files, filetypes);
+        
+        setWaitDialog(false);
+        alertInfo(`Project "${project.title}" published successfully! Files pushed to server.`);
+        gaEvent('api', 'project', 'create');
+        gaEvent('api', 'sync', 'push');
       } catch (e) {
         setWaitDialog(false);
-        alertError("Failed to create project: " + e.message);
+        alertError("Failed to publish project: " + e.message);
         gaEvent('api', 'project', 'create_error');
       }
     });
