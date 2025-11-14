@@ -651,16 +651,16 @@ async function bindToApiProject(project) {
         // Refresh window list to register all files with the window system
         (0, ui_1.refreshWindowList)();
         // Set main file if we found one and it's not already set
+        let fileToOpen = null;
         if (mainFile && !currentProj.mainPath) {
             console.log('bindToApiProject: Setting main file to', mainFile);
             currentProj.setMainFile(mainFile);
-            // Open the main file window (now that it's registered)
-            ui_1.projectWindows.createOrShow(mainFile);
+            fileToOpen = mainFile;
         }
         else if (mainFile && currentProj.mainPath !== mainFile) {
             console.log('bindToApiProject: Updating main file from', currentProj.mainPath, 'to', mainFile);
             currentProj.setMainFile(mainFile);
-            ui_1.projectWindows.createOrShow(mainFile);
+            fileToOpen = mainFile;
         }
         else if (Object.keys(files).length > 0 && !mainFile) {
             // If no source file found, use the first file
@@ -668,8 +668,22 @@ async function bindToApiProject(project) {
             if (!currentProj.mainPath) {
                 console.log('bindToApiProject: Setting main file to first file', firstFile);
                 currentProj.setMainFile(firstFile);
-                ui_1.projectWindows.createOrShow(firstFile);
+                fileToOpen = firstFile;
             }
+        }
+        else if (currentProj.mainPath) {
+            // Use existing main file if no new one was determined
+            fileToOpen = currentProj.mainPath;
+        }
+        // Update URL to reflect the new project and file
+        if (fileToOpen) {
+            // Open the main file window (now that it's registered)
+            ui_1.projectWindows.createOrShow(fileToOpen);
+            // Update URL with new file and platform
+            (0, ui_1.gotoNewLocation)(false, {
+                file: fileToOpen,
+                platform: ui_1.platform_id
+            });
         }
         (0, dialogs_1.setWaitDialog)(false);
         (0, dialogs_1.alertInfo)(`Synced with project "${project.title}". Files pulled from server.`);

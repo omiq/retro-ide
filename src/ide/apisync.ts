@@ -717,23 +717,38 @@ export async function bindToApiProject(project: ApiProject) {
     refreshWindowList();
     
     // Set main file if we found one and it's not already set
+    let fileToOpen: string | null = null;
     if (mainFile && !currentProj.mainPath) {
       console.log('bindToApiProject: Setting main file to', mainFile);
       currentProj.setMainFile(mainFile);
-      // Open the main file window (now that it's registered)
-      projectWindows.createOrShow(mainFile);
+      fileToOpen = mainFile;
     } else if (mainFile && currentProj.mainPath !== mainFile) {
       console.log('bindToApiProject: Updating main file from', currentProj.mainPath, 'to', mainFile);
       currentProj.setMainFile(mainFile);
-      projectWindows.createOrShow(mainFile);
+      fileToOpen = mainFile;
     } else if (Object.keys(files).length > 0 && !mainFile) {
       // If no source file found, use the first file
       const firstFile = Object.keys(files)[0];
       if (!currentProj.mainPath) {
         console.log('bindToApiProject: Setting main file to first file', firstFile);
         currentProj.setMainFile(firstFile);
-        projectWindows.createOrShow(firstFile);
+        fileToOpen = firstFile;
       }
+    } else if (currentProj.mainPath) {
+      // Use existing main file if no new one was determined
+      fileToOpen = currentProj.mainPath;
+    }
+    
+    // Update URL to reflect the new project and file
+    if (fileToOpen) {
+      // Open the main file window (now that it's registered)
+      projectWindows.createOrShow(fileToOpen);
+      
+      // Update URL with new file and platform
+      gotoNewLocation(false, {
+        file: fileToOpen,
+        platform: platform_id
+      });
     }
     
     setWaitDialog(false);
