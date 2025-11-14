@@ -21,6 +21,7 @@ import { CallStackView, DebugBrowserView } from "./views/treeviews";
 import DOMPurify = require("dompurify");
 import { alertError, alertInfo, fatalError, setWaitDialog, setWaitProgress } from "./dialogs";
 import { _importProjectFromGithub, _loginToGithub, _logoutOfGithub, _publishProjectToGithub, _pullProjectFromGithub, _pushProjectToGithub, _removeRepository, importProjectFromGithub } from "./sync";
+import { _registerUser, _loginUser, _logoutUser, updateApiAuthUI, toggleApiUserMenu, _createApiProject, _listApiProjects, _pushToApi, _pullFromApi } from "./apisync";
 import { gaEvent, gaPageView } from "./analytics";
 import { _downloadAllFilesZipFile, _downloadCassetteFile, _downloadProjectZipFile, _downloadROMImage, _downloadSourceFile, _downloadSymFile, _getCassetteFunction, _recordVideo, _shareEmbedLink } from "./shareexport";
 
@@ -309,7 +310,7 @@ function newDropdownListItem(id, text) {
   return {li, a};
 }
 
-function refreshWindowList() {
+export function refreshWindowList() {
   var ul = $("#windowMenuList").empty();
   var separate = false;
 
@@ -1527,6 +1528,38 @@ function setupDebugControls() {
   $("#item_github_push").click(_pushProjectToGithub);
   $("#item_github_pull").click(_pullProjectFromGithub);
   $("#item_repo_delete").click(_removeRepository);
+  
+  // API sync event handlers
+  $("#apiLoginButton").click(_loginUser);
+  $("#apiRegisterButton").click(_registerUser);
+  $("#apiUserAvatar").click((e) => {
+    e.stopPropagation();
+    toggleApiUserMenu();
+  });
+  $("#item_api_logout").click((e) => {
+    e.preventDefault();
+    _logoutUser();
+  });
+  $("#item_api_projects").click((e) => {
+    e.preventDefault();
+    if ($(e.target).hasClass('disabled')) return;
+    _listApiProjects();
+  });
+  $("#item_api_create_project").click((e) => {
+    e.preventDefault();
+    if ($(e.target).hasClass('disabled')) return;
+    _createApiProject();
+  });
+  $("#item_api_push").click((e) => {
+    e.preventDefault();
+    if ($(e.target).hasClass('disabled')) return;
+    _pushToApi();
+  });
+  $("#item_api_pull").click((e) => {
+    e.preventDefault();
+    if ($(e.target).hasClass('disabled')) return;
+    _pullFromApi();
+  });
   $("#item_share_file").click(_shareEmbedLink);
   $("#item_reset_file").click(_revertFile);
   $("#item_rename_file").click(_renameFile);
@@ -1938,6 +1971,9 @@ async function startPlatform() {
     showWelcomeMessage();
   }
   revealTopBar();
+  
+  // Initialize API auth UI
+  updateApiAuthUI();
 }
 
 function hideControlsForEmbed() {

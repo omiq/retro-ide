@@ -87,6 +87,51 @@ function enableRecording() {
 }
 
 function findPrimaryCanvas() {
+  // Try multiple strategies to find the canvas:
+  
+  // 1. Try to find canvas by ID (C64 chips and VIC20 chips use id='canvas')
+  var canvas = document.getElementById('canvas') as HTMLCanvasElement;
+  if (canvas) {
+    return $(canvas);
+  }
+  
+  // 2. Look in C64 chips emulator div
+  var c64Screen = document.getElementById('c64-chips-screen');
+  if (c64Screen) {
+    var c64Canvas = c64Screen.querySelector('canvas');
+    if (c64Canvas) {
+      return $(c64Canvas);
+    }
+  }
+  
+  // 3. Look in VIC20 chips emulator div
+  var vic20Screen = document.getElementById('vic20-chips-screen');
+  if (vic20Screen) {
+    var vic20Canvas = vic20Screen.querySelector('canvas');
+    if (vic20Canvas) {
+      return $(vic20Canvas);
+    }
+  }
+  
+  // 4. Look in javatari div
+  var javatariScreen = document.getElementById('javatari-screen');
+  if (javatariScreen) {
+    var javatariCanvas = javatariScreen.querySelector('canvas');
+    if (javatariCanvas) {
+      return $(javatariCanvas);
+    }
+  }
+  
+  // 5. Look in emuscreen (for platforms that add canvas directly)
+  var emuscreen = document.getElementById('emuscreen');
+  if (emuscreen) {
+    var emuscreenCanvas = emuscreen.querySelector('canvas');
+    if (emuscreenCanvas) {
+      return $(emuscreenCanvas);
+    }
+  }
+  
+  // 6. Fallback: search anywhere in emulator div
   return $("#emulator").find('canvas');
 }
 
@@ -157,7 +202,8 @@ async function startPlatform(qs) {
   } else if (lzgvar) {
     // decompress from lzg
     var lzgrom = stringToByteArray(atob(lzgvar));
-    rom = new lzgmini().decode(lzgrom);
+    var decoded = new lzgmini().decode(lzgrom);
+    rom = new Uint8Array(decoded);
   }
   addPageFocusHandlers();
   startROM(title, rom);

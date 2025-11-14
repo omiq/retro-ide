@@ -279,13 +279,56 @@ async function _downloadAllFilesZipFile(e) {
     }
 }
 var recordingVideo = false;
+function findPrimaryCanvasForRecording() {
+    // Try multiple strategies to find the canvas:
+    // 1. Try to find canvas by ID (C64 chips and VIC20 chips use id='canvas')
+    var canvas = document.getElementById('canvas');
+    if (canvas) {
+        return canvas;
+    }
+    // 2. Look in C64 chips emulator div
+    var c64Screen = document.getElementById('c64-chips-screen');
+    if (c64Screen) {
+        var c64Canvas = c64Screen.querySelector('canvas');
+        if (c64Canvas) {
+            return c64Canvas;
+        }
+    }
+    // 3. Look in VIC20 chips emulator div
+    var vic20Screen = document.getElementById('vic20-chips-screen');
+    if (vic20Screen) {
+        var vic20Canvas = vic20Screen.querySelector('canvas');
+        if (vic20Canvas) {
+            return vic20Canvas;
+        }
+    }
+    // 4. Look in javatari div
+    var javatariScreen = document.getElementById('javatari-screen');
+    if (javatariScreen) {
+        var javatariCanvas = javatariScreen.querySelector('canvas');
+        if (javatariCanvas) {
+            return javatariCanvas;
+        }
+    }
+    // 5. Look in emuscreen (for platforms that add canvas directly)
+    var emuscreen = document.getElementById('emuscreen');
+    if (emuscreen) {
+        var emuscreenCanvas = emuscreen.querySelector('canvas');
+        if (emuscreenCanvas) {
+            return emuscreenCanvas;
+        }
+    }
+    // 6. Fallback: search anywhere in emulator div
+    var fallbackCanvas = $("#emulator").find("canvas")[0];
+    return fallbackCanvas || null;
+}
 function _recordVideo() {
     if (recordingVideo)
         return;
     (0, util_1.loadScript)("lib/gif.js").then(() => {
-        var canvas = $("#emulator").find("canvas")[0];
+        var canvas = findPrimaryCanvasForRecording();
         if (!canvas) {
-            (0, dialogs_1.alertError)("Could not find canvas element to record video!");
+            (0, dialogs_1.alertError)("Could not find canvas element to record video! Video recording is not supported for iframe-based emulators (e.g., BBC Micro).");
             return;
         }
         var rotate = 0;

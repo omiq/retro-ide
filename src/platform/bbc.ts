@@ -175,6 +175,12 @@ export class BBCMicroPlatform implements Platform {
   }
 
   loadROM(title: string, rom: Uint8Array): void {
+    // Validate rom parameter
+    if (!rom || !(rom instanceof Uint8Array)) {
+      console.error("BBCMicroPlatform loadROM: Invalid rom parameter", rom);
+      return;
+    }
+    
     console.log("BBCMicroPlatform loadROM called with title:", title, "and", rom.length, "bytes");
     
     var frame = document.getElementById("bbc-iframe") as HTMLIFrameElement;
@@ -191,22 +197,26 @@ export class BBCMicroPlatform implements Platform {
         console.log("BBCMicroPlatform: BBC BASIC program detected");
         
         // Convert bytes back to text for BASIC programs
-        const basicText = new TextDecoder().decode(rom);
-        const encodedBasic = encodeURIComponent(basicText);
-        
-        // Check if the URL would be too long (limit to ~1500 chars to be safe)
-        const iframeURL = `bbc-iframe.html?embedBasic=${encodedBasic}&t=${Date.now()}${modelQuery}`;
-        
-        if (iframeURL.length > 1500) {
-          console.log("BBCMicroPlatform: BASIC program too long for URL, saving to PHP server and using loadBasic");
-          // For long programs, save to PHP server and use loadBasic URL parameter
-          this.saveFileToServerAndLoad(basicText, frame, modelQuery);
-        } else {
-          console.log("BBCMicroPlatform: Using embedBasic parameter for short BASIC program");
-          frame.src = iframeURL;
+        try {
+          const basicText = new TextDecoder().decode(rom);
+          const encodedBasic = encodeURIComponent(basicText);
+          
+          // Check if the URL would be too long (limit to ~1500 chars to be safe)
+          const iframeURL = `bbc-iframe.html?embedBasic=${encodedBasic}&t=${Date.now()}${modelQuery}`;
+          
+          if (iframeURL.length > 1500) {
+            console.log("BBCMicroPlatform: BASIC program too long for URL, saving to PHP server and using loadBasic");
+            // For long programs, save to PHP server and use loadBasic URL parameter
+            this.saveFileToServerAndLoad(basicText, frame, modelQuery);
+          } else {
+            console.log("BBCMicroPlatform: Using embedBasic parameter for short BASIC program");
+            frame.src = iframeURL;
+          }
+          
+          console.log("BBCMicroPlatform: Loading iframe with BASIC program, URL length:", iframeURL.length);
+        } catch (e) {
+          console.error("BBCMicroPlatform: Error decoding BASIC program:", e);
         }
-        
-        console.log("BBCMicroPlatform: Loading iframe with BASIC program, URL length:", iframeURL.length);
       } else if (rom.length > 0) { // Compiled C program
         console.log("BBCMicroPlatform: Compiled C program detected, using postMessage");
         
@@ -842,21 +852,31 @@ export class BBCMicroPlatform implements Platform {
   }
 
   private isBasicProgram(rom: Uint8Array): boolean {
+    // Check if rom is valid
+    if (!rom || !(rom instanceof Uint8Array) || rom.length === 0) {
+      return false;
+    }
+    
     // Check if this looks like BBC BASIC source code
     // BBC BASIC programs typically start with line numbers and contain BASIC keywords
-    const text = new TextDecoder().decode(rom);
-    
-    // Look for BBC BASIC patterns:
-    // 1. Starts with a line number (digits followed by space)
-    // 2. Contains BBC BASIC keywords
-    const basicKeywords = ['PRINT', 'REM', 'MODE', 'COLOUR', 'GOTO', 'FOR', 'NEXT', 'IF', 'THEN', 'ELSE', 'END', 'STOP', 'RUN', 'NEW', 'LOAD', 'SAVE'];
-    
-    const hasLineNumbers = /^\d+\s/.test(text.trim());
-    const hasBasicKeywords = basicKeywords.some(keyword => 
-      text.toUpperCase().includes(keyword)
-    );
-    
-    return hasLineNumbers && hasBasicKeywords;
+    try {
+      const text = new TextDecoder().decode(rom);
+      
+      // Look for BBC BASIC patterns:
+      // 1. Starts with a line number (digits followed by space)
+      // 2. Contains BBC BASIC keywords
+      const basicKeywords = ['PRINT', 'REM', 'MODE', 'COLOUR', 'GOTO', 'FOR', 'NEXT', 'IF', 'THEN', 'ELSE', 'END', 'STOP', 'RUN', 'NEW', 'LOAD', 'SAVE'];
+      
+      const hasLineNumbers = /^\d+\s/.test(text.trim());
+      const hasBasicKeywords = basicKeywords.some(keyword => 
+        text.toUpperCase().includes(keyword)
+      );
+      
+      return hasLineNumbers && hasBasicKeywords;
+    } catch (e) {
+      console.error("BBCMicroPlatform: Error decoding ROM in isBasicProgram:", e);
+      return false;
+    }
   }
 
   private updateControlButtons(): void {
