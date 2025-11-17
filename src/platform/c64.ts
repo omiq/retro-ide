@@ -13,6 +13,7 @@ const C64_PRESETS : Preset[] = [
   {id:'pong.bas', name:'Pong Style Game (BASIC)'},
   {id:'lander.bas', name:'Space Lander Game (BASIC)'},
   {id:'adventure.bas', name:'Adventure Game (BASIC)'},
+  {id:'maze3.bas', name:'3D Maze Game (BASIC)'},
   {id:'trek64.bas', name:'Star Trek (BASIC)'},
   {id:'controlcodes.bas', name:'Control Codes Demo (BASIC)'},
   {id:'helloc.c', name:'Hello World', category:'C Tutorial'},
