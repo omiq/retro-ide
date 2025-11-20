@@ -66,7 +66,14 @@ function compileKickAss($buildStep, $updates, $sessionID) {
     
     // Create session directory
     if (!is_dir($sessionDir)) {
-        mkdir($sessionDir, 0777, true);
+        if (!mkdir($sessionDir, 0777, true)) {
+            return ['errors' => [['line' => 0, 'msg' => "Failed to create session directory: {$sessionDir}", 'path' => '']]];
+        }
+    }
+    
+    // Verify directory is writable
+    if (!is_writable($sessionDir)) {
+        return ['errors' => [['line' => 0, 'msg' => "Session directory is not writable: {$sessionDir}", 'path' => '']]];
     }
     
     // Write source files
@@ -97,12 +104,16 @@ function compileKickAss($buildStep, $updates, $sessionID) {
         }
     }
     
-    // Run KickAss
-    $outputFile = "{$sessionDir}/output.prg";
-    $listFile = "{$sessionDir}/output.lst";
-    $symFile = "{$sessionDir}/output.sym";
+    // Run KickAss from the session directory with relative paths
+    $outputFile = "output.prg";
+    $listFile = "output.lst";
+    $symFile = "output.sym";
+    $mainFile = $buildStep['path'];
     
-    $mainFile = "{$sessionDir}/{$buildStep['path']}";
+    // Full paths for reading results later
+    $outputFileFull = "{$sessionDir}/{$outputFile}";
+    $listFileFull = "{$sessionDir}/{$listFile}";
+    $symFileFull = "{$sessionDir}/{$symFile}";
     
     // KickAss.jar path (adjust if needed)
     $kickAssJar = '/home/ide/htdocs/KickAss.jar';
@@ -113,6 +124,18 @@ function compileKickAss($buildStep, $updates, $sessionID) {
     
     if (!file_exists($kickAssJar)) {
         return ['errors' => [['line' => 0, 'msg' => 'KickAss.jar not found', 'path' => '']]];
+    }
+    
+    // Change to session directory and run KickAss with relative paths
+    $originalDir = getcwd();
+    if (!chdir($sessionDir)) {
+        return ['errors' => [['line' => 0, 'msg' => "Failed to change to session directory: {$sessionDir}", 'path' => '']]];
+    }
+    
+    // Verify main file exists
+    if (!file_exists($mainFile)) {
+        chdir($originalDir);
+        return ['errors' => [['line' => 0, 'msg' => "Main file not found: {$mainFile}", 'path' => $mainFile]]];
     }
     
     $cmd = sprintf(
@@ -127,20 +150,23 @@ function compileKickAss($buildStep, $updates, $sessionID) {
     exec($cmd, $output, $returnCode);
     $errorOutput = implode("\n", $output);
     
-    if ($returnCode === 0 && file_exists($outputFile)) {
+    // Restore original directory
+    chdir($originalDir);
+    
+    if ($returnCode === 0 && file_exists($outputFileFull)) {
         // Success - read output
-        $outputData = file_get_contents($outputFile);
+        $outputData = file_get_contents($outputFileFull);
         $outputBase64 = base64_encode($outputData);
         
         // Parse listings and symbols (optional)
         $listings = [];
-        if (file_exists($listFile)) {
-            $listings = parseListingFile($listFile);
+        if (file_exists($listFileFull)) {
+            $listings = parseListingFile($listFileFull);
         }
         
         $symbolmap = [];
-        if (file_exists($symFile)) {
-            $symbolmap = parseSymbolFile($symFile);
+        if (file_exists($symFileFull)) {
+            $symbolmap = parseSymbolFile($symFileFull);
         }
         
         // Cleanup (optional - can be done later)
