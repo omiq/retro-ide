@@ -16269,6 +16269,103 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
     }
   });
 
+  // src/worker/tools/kickass.ts
+  function generateSessionID() {
+    return "kickass_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
+  }
+  async function compileKickAss(step) {
+    gatherFiles(step);
+    var binpath = "output.prg";
+    if (staleFiles(step, [binpath])) {
+      let updates = [];
+      for (var i = 0; i < step.files.length; i++) {
+        let path = step.files[i];
+        let entry = store.workfs[path];
+        if (!entry) {
+          return {
+            errors: [{
+              line: 0,
+              msg: `File not found: ${path}`,
+              path
+            }]
+          };
+        }
+        let data;
+        if (typeof entry.data === "string") {
+          data = entry.data;
+        } else {
+          data = "data:base64," + btoa(byteArrayToString(entry.data));
+        }
+        updates.push({ path, data });
+      }
+      const sessionID2 = generateSessionID();
+      const cmd = {
+        buildStep: {
+          path: step.path,
+          files: step.files,
+          platform: step.platform,
+          tool: "kickass",
+          mainfile: step.mainfile || false
+        },
+        updates,
+        sessionID: sessionID2
+      };
+      try {
+        console.log("KickAss API: POST", cmd);
+        let result = await fetch(KICKASS_API_URL, {
+          method: "POST",
+          mode: "cors",
+          body: JSON.stringify(cmd),
+          headers: {
+            "Content-Type": "application/json"
+          }
+        });
+        if (!result.ok) {
+          return {
+            errors: [{
+              line: 0,
+              msg: `HTTP ${result.status}: ${result.statusText}`,
+              path: step.path
+            }]
+          };
+        }
+        let json = await result.json();
+        if (isUnchanged(json)) {
+          return json;
+        }
+        if (isErrorResult(json)) {
+          return json;
+        }
+        if (isOutputResult(json)) {
+          if (typeof json.output === "string") {
+            json.output = stringToByteArray(atob(json.output));
+          }
+          return json;
+        }
+        throw new Error(`Unexpected result from KickAss API: ${JSON.stringify(json)}`);
+      } catch (error) {
+        console.error("KickAss API error:", error);
+        return {
+          errors: [{
+            line: 0,
+            msg: `KickAss API error: ${error}`,
+            path: step.path
+          }]
+        };
+      }
+    }
+    return { unchanged: true };
+  }
+  var KICKASS_API_URL;
+  var init_kickass = __esm({
+    "src/worker/tools/kickass.ts"() {
+      init_util();
+      init_workertypes();
+      init_builder();
+      KICKASS_API_URL = "https://ide.retrogamecoders.com/api/kickass/compile.php";
+    }
+  });
+
   // src/worker/workertools.ts
   var TOOLS, TOOL_PRELOADFS;
   var init_workertools = __esm({
@@ -16291,6 +16388,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
       init_oscar64();
       init_c64basic();
       init_bbcbasic();
+      init_kickass();
       TOOLS = {
         "dasm": assembleDASM,
         "acme": assembleACME,
@@ -16329,6 +16427,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
         "oscar64": compileOscar64,
         "c64basic": compileC64Basic,
         "bbcbasic": compileBbcBasic,
+        "kickass": compileKickAss,
         "none": async (step) => {
           const { getWorkFileAsString: getWorkFileAsString3 } = await Promise.resolve().then(() => (init_builder(), builder_exports));
           const sourceCode = getWorkFileAsString3(step.path);

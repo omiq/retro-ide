@@ -22,6 +22,8 @@ const C64_PRESETS = [
     { id: 'adventure.c', name: 'Text Adventure' },
     { id: 'hello.acme', name: 'Hello World', category: 'Assembly (ACME)' },
     { id: 'rasters.acme', name: 'Rasters' },
+    { id: 'hello.asm', name: 'Hello World', category: 'Assembly (KickAss)' },
+    { id: 'skeleton.asm', name: 'Skeleton Template', category: 'Assembly (KickAss)' },
     { id: 'screen_ram.c', name: 'Screen RAM', category: '8-bit Workshop Demos' },
     { id: 'siegegame.c', name: 'Siege Game' },
     { id: 'joymove.c', name: 'Sprite Movement' },
@@ -392,6 +394,8 @@ class C64ChipsPlatform {
     getToolForFilename(filename) {
         if (filename.toLowerCase().endsWith(".bas"))
             return "c64basic";
+        if (filename.endsWith(".asm"))
+            return "kickass";
         if (filename.endsWith(".c"))
             return "cc65";
         if (filename.endsWith(".dasm"))

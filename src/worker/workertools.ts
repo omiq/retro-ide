@@ -17,6 +17,7 @@ import * as bataribasic from './tools/bataribasic'
 import * as oscar64 from './tools/oscar64'
 import * as c64basic from './tools/c64basic'
 import * as bbcbasic from './tools/bbcbasic'
+import * as kickass from './tools/kickass'
 import { PLATFORM_PARAMS } from "./platforms";
 
 export const TOOLS = {
@@ -60,6 +61,7 @@ export const TOOLS = {
   'oscar64': oscar64.compileOscar64,
   'c64basic': c64basic.compileC64Basic,
   'bbcbasic': bbcbasic.compileBbcBasic,
+  'kickass': kickass.compileKickAss,
   'none': async (step: any) => {
     // No-op tool for platforms that handle compilation themselves
     // Return the source code as output so loadROM gets called
