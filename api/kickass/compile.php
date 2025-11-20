@@ -106,14 +106,18 @@ function compileKickAss($buildStep, $updates, $sessionID) {
     
     // Run KickAss from the session directory with relative paths
     $outputFile = "output.prg";
-    $listFile = "output.lst";
-    $symFile = "output.sym";
     $mainFile = $buildStep['path'];
+    
+    // KickAss generates symbol files automatically with -vicesymbols
+    // It creates: {basename}.sym and {basename}.vs
+    $mainFileBase = pathinfo($mainFile, PATHINFO_FILENAME);
+    $symFile = "{$mainFileBase}.sym";
+    $vsFile = "{$mainFileBase}.vs";
     
     // Full paths for reading results later
     $outputFileFull = "{$sessionDir}/{$outputFile}";
-    $listFileFull = "{$sessionDir}/{$listFile}";
     $symFileFull = "{$sessionDir}/{$symFile}";
+    $vsFileFull = "{$sessionDir}/{$vsFile}";
     
     // KickAss.jar path (adjust if needed)
     $kickAssJar = '/home/ide/htdocs/KickAss.jar';
@@ -138,13 +142,13 @@ function compileKickAss($buildStep, $updates, $sessionID) {
         return ['errors' => [['line' => 0, 'msg' => "Main file not found: {$mainFile}", 'path' => $mainFile]]];
     }
     
+    // KickAss command: input file first, then -o output, then -vicesymbols
+    // -vicesymbols automatically generates {basename}.sym and {basename}.vs files
     $cmd = sprintf(
-        'java -jar %s -o %s -vicesymbols -symbolfile %s -listfile %s %s 2>&1',
+        'java -jar %s %s -o %s -vicesymbols 2>&1',
         escapeshellarg($kickAssJar),
-        escapeshellarg($outputFile),
-        escapeshellarg($symFile),
-        escapeshellarg($listFile),
-        escapeshellarg($mainFile)
+        escapeshellarg($mainFile),
+        escapeshellarg($outputFile)
     );
     
     exec($cmd, $output, $returnCode);
@@ -158,16 +162,19 @@ function compileKickAss($buildStep, $updates, $sessionID) {
         $outputData = file_get_contents($outputFileFull);
         $outputBase64 = base64_encode($outputData);
         
-        // Parse listings and symbols (optional)
-        $listings = [];
-        if (file_exists($listFileFull)) {
-            $listings = parseListingFile($listFileFull);
-        }
-        
+        // Parse symbols (optional)
+        // KickAss generates both .sym and .vs files with -vicesymbols
         $symbolmap = [];
         if (file_exists($symFileFull)) {
             $symbolmap = parseSymbolFile($symFileFull);
+        } elseif (file_exists($vsFileFull)) {
+            // Fallback to .vs file if .sym doesn't exist
+            $symbolmap = parseSymbolFile($vsFileFull);
         }
+        
+        // Listing files are not directly supported by KickAss
+        // We can parse the output or error messages if needed
+        $listings = [];
         
         // Cleanup (optional - can be done later)
         // cleanupSessionDir($sessionDir);
@@ -247,7 +254,7 @@ function parseListingFile($listFile) {
 }
 
 /**
- * Parse KickAss symbol file (VICE format)
+ * Parse KickAss symbol file (.sym or .vs format)
  * Returns map of symbol names to addresses
  */
 function parseSymbolFile($symFile) {
@@ -258,8 +265,6 @@ function parseSymbolFile($symFile) {
         return $symbolmap;
     }
     
-    // VICE symbol file format: "al 0000 label_name"
-    // Format: <type> <address> <label>
     $lines = explode("\n", $content);
     
     foreach ($lines as $line) {
@@ -268,8 +273,22 @@ function parseSymbolFile($symFile) {
             continue; // Skip comments and empty lines
         }
         
-        // Parse: "al 0000 label_name" or "al $0000 label_name"
-        if (preg_match('/^\w+\s+\$?([0-9a-fA-F]+)\s+(\w+)/', $line, $matches)) {
+        // Parse .sym format: ".label name=$address" or ".label name=$address"
+        // Example: ".label start=$80e"
+        if (preg_match('/^\.label\s+(\w+)=\$?([0-9a-fA-F]+)/i', $line, $matches)) {
+            $label = $matches[1];
+            $address = hexdec($matches[2]);
+            $symbolmap[$label] = $address;
+        }
+        // Parse .vs format (VICE): "al C:address .labelname"
+        // Example: "al C:80e .start"
+        elseif (preg_match('/^al\s+C:([0-9a-fA-F]+)\s+\.(\w+)/i', $line, $matches)) {
+            $address = hexdec($matches[1]);
+            $label = $matches[2];
+            $symbolmap[$label] = $address;
+        }
+        // Parse alternative VICE format: "al 0000 label_name" or "al $0000 label_name"
+        elseif (preg_match('/^\w+\s+\$?([0-9a-fA-F]+)\s+(\w+)/', $line, $matches)) {
             $address = hexdec($matches[1]);
             $label = $matches[2];
             $symbolmap[$label] = $address;
