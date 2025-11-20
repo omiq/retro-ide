@@ -16269,6 +16269,38 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
     }
   });
 
+  // src/worker/tools/applesoftbasic.ts
+  function compileAppleSoftBasic(step) {
+    const outputPath = step.prefix + ".bas";
+    gatherFiles(step);
+    if (staleFiles(step, [outputPath])) {
+      try {
+        const source = getWorkFileAsString(step.path) || "";
+        const sourceBytes = new TextEncoder().encode(source);
+        putWorkFile(outputPath, sourceBytes);
+        return {
+          output: sourceBytes,
+          listings: {},
+          errors: []
+        };
+      } catch (error) {
+        return {
+          errors: [{
+            msg: error instanceof Error ? error.message : String(error),
+            line: 0,
+            path: step.path
+          }]
+        };
+      }
+    }
+    return { unchanged: true };
+  }
+  var init_applesoftbasic = __esm({
+    "src/worker/tools/applesoftbasic.ts"() {
+      init_builder();
+    }
+  });
+
   // src/worker/tools/kickass.ts
   function generateSessionID() {
     return "kickass_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
@@ -16388,6 +16420,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
       init_oscar64();
       init_c64basic();
       init_bbcbasic();
+      init_applesoftbasic();
       init_kickass();
       TOOLS = {
         "dasm": assembleDASM,
@@ -16427,6 +16460,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
         "oscar64": compileOscar64,
         "c64basic": compileC64Basic,
         "bbcbasic": compileBbcBasic,
+        "applesoftbasic": compileAppleSoftBasic,
         "kickass": compileKickAss,
         "none": async (step) => {
           const { getWorkFileAsString: getWorkFileAsString3 } = await Promise.resolve().then(() => (init_builder(), builder_exports));

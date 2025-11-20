@@ -1,0 +1,15 @@
+05 REM Hires Demo
+10 HOME : HGR
+20 W = 279 : H = 159
+30 FOR I = 0 TO 1 STEP 0.05
+35 HCOLOR= 1
+40 HPLOT 0,H * I     TO W* (1-I),0
+45 HCOLOR= 2
+50 HPLOT 0,H * (1-I) TO W* (1-I),H
+55 HCOLOR= 5
+60 HPLOT W,H * I     TO W * I,0
+65 HCOLOR= 6
+70 HPLOT W,H * (1-I) TO W * I,H
+75 NEXT
+80 HTAB 1 : VTAB 22 : PRINT "Press any key to continue: " : GET A$
+

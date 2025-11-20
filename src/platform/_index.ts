@@ -4,6 +4,7 @@ export function importPlatform(name: string) : Promise<any> {
     switch (name) {
       case "apple2": return import("../platform/apple2");
       case "apple2.mame": return import("../platform/apple2");
+      case "apple2e": return import("../platform/apple2e");
       case "arm32": return import("../platform/arm32");
       case "astrocade": return import("../platform/astrocade");
       case "astrocade-bios": return import("../platform/astrocade");

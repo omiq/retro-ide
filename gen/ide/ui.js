@@ -1096,6 +1096,19 @@ function resume() {
     if (!checkRunReady())
         return;
     clearBreakpoint();
+    // For Apple IIe platform, use the API's run() method
+    if (exports.platform_id === 'apple2e') {
+        const api = window.IDE.getApple2API();
+        if (api && api.run) {
+            console.log('Apple2E: Using API run() method');
+            api.run();
+            setDebugButtonState("go", "active");
+            if (errorWasRuntime) {
+                hideErrorAlerts();
+            }
+            return;
+        }
+    }
     if (!exports.platform.isRunning()) {
         exports.projectWindows.refresh(false);
     }
@@ -2389,6 +2402,100 @@ function exposeToGlobal() {
             console.log("✅ Loading ROM with", output.length, "bytes");
             exports.platform.loadROM(getCurrentMainFilename(), output);
         },
+        // Get Apple2 API (for apple2e platform only)
+        getApple2API: () => {
+            if (!exports.platform) {
+                console.error('❌ No platform loaded');
+                return null;
+            }
+            if (exports.platform_id !== 'apple2e') {
+                console.error('❌ Not on Apple IIe platform. Current platform:', exports.platform_id);
+                return null;
+            }
+            if (typeof exports.platform.getApple2API !== 'function') {
+                console.error('❌ Platform does not have getApple2API method');
+                return null;
+            }
+            const api = exports.platform.getApple2API();
+            if (!api) {
+                console.error('❌ getApple2API returned null. Emulator may not be ready yet.');
+                console.log('💡 Try waiting a moment and check if the emulator is loaded.');
+                return null;
+            }
+            console.log('✅ Apple2 API available!');
+            console.log('💡 Try: api.type(\'PRINT "HELLO"\\r\') or api.reset()');
+            console.log('💡 Or: const apple2 = api.apple2; apple2.reset();');
+            // Test if emulator is accessible
+            try {
+                const testApple2 = api.apple2;
+                if (testApple2) {
+                    console.log('✅ apple2 instance accessible');
+                    console.log('   Running?', testApple2.isRunning());
+                    console.log('   Ready?', testApple2.ready);
+                }
+                else {
+                    console.warn('⚠️ apple2 instance is null');
+                }
+            }
+            catch (e) {
+                console.error('❌ Error accessing apple2:', e);
+            }
+            return api;
+        },
+        // Break/interrupt running Apple2 program (Ctrl+C)
+        breakApple2: () => {
+            const api = window.IDE.getApple2API();
+            if (!api) {
+                console.error('❌ API not available');
+                return;
+            }
+            if (typeof api.break === 'function') {
+                api.break();
+                console.log('✅ Sent BRK (Ctrl+C) to interrupt program');
+            }
+            else {
+                console.error('❌ break() method not available');
+            }
+        },
+        // Test Apple2 API (helper function)
+        testApple2API: () => {
+            const api = window.IDE.getApple2API();
+            if (!api) {
+                console.error('❌ API not available');
+                return;
+            }
+            console.log('🧪 Testing Apple2 API...');
+            // Test 1: Check if emulator is accessible
+            const apple2 = api.apple2;
+            if (!apple2) {
+                console.error('❌ apple2 instance not available');
+                return;
+            }
+            console.log('✅ apple2 instance found');
+            // Test 2: Check if running
+            const isRunning = apple2.isRunning();
+            console.log('   Running?', isRunning);
+            if (!isRunning) {
+                console.log('   Starting emulator...');
+                apple2.run();
+                setTimeout(() => {
+                    console.log('   Running now?', apple2.isRunning());
+                }, 200);
+            }
+            // Test 3: Check IO
+            const io = api.getIO();
+            if (!io) {
+                console.error('❌ IO not available');
+                return;
+            }
+            console.log('✅ IO available');
+            console.log('   setKeyBuffer?', typeof io.setKeyBuffer === 'function');
+            // Test 4: Try typing
+            console.log('🧪 Testing type() method...');
+            const result = api.type('PRINT "TEST"\r');
+            console.log('   Result:', result);
+            return { api, apple2, io, isRunning };
+        },
         // Debug function to access compilation output
         debugCompilation: () => {
             console.log("=== DEBUGGING COMPILATION OUTPUT ===");
@@ -2447,6 +2554,11 @@ function exposeToGlobal() {
     console.log("IDE variables exposed globally. Access via window.IDE");
     console.log("Use window.IDE.loadROM() to load the current compiled output");
     console.log("Use window.IDE.debugCompilation() to debug compilation output");
+    if (exports.platform_id === 'apple2e') {
+        console.log("Use window.IDE.getApple2API() to access Apple2 emulator API");
+        console.log("Example: const api = window.IDE.getApple2API(); api.type('PRINT \"HELLO\"\\r');");
+        console.log("Break program: window.IDE.breakApple2() or api.break()");
+    }
 }
 // Auto-expose when module loads
 setTimeout(exposeToGlobal, 1000);

@@ -29,6 +29,7 @@ function importPlatform(name) {
     switch (name) {
         case "apple2": return Promise.resolve().then(() => __importStar(require("../platform/apple2")));
         case "apple2.mame": return Promise.resolve().then(() => __importStar(require("../platform/apple2")));
+        case "apple2e": return Promise.resolve().then(() => __importStar(require("../platform/apple2e")));
         case "arm32": return Promise.resolve().then(() => __importStar(require("../platform/arm32")));
         case "astrocade": return Promise.resolve().then(() => __importStar(require("../platform/astrocade")));
         case "astrocade-bios": return Promise.resolve().then(() => __importStar(require("../platform/astrocade")));

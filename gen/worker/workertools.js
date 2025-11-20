@@ -42,6 +42,7 @@ const bataribasic = __importStar(require("./tools/bataribasic"));
 const oscar64 = __importStar(require("./tools/oscar64"));
 const c64basic = __importStar(require("./tools/c64basic"));
 const bbcbasic = __importStar(require("./tools/bbcbasic"));
+const applesoftbasic = __importStar(require("./tools/applesoftbasic"));
 const kickass = __importStar(require("./tools/kickass"));
 exports.TOOLS = {
     'dasm': dasm.assembleDASM,
@@ -84,6 +85,7 @@ exports.TOOLS = {
     'oscar64': oscar64.compileOscar64,
     'c64basic': c64basic.compileC64Basic,
     'bbcbasic': bbcbasic.compileBbcBasic,
+    'applesoftbasic': applesoftbasic.compileAppleSoftBasic,
     'kickass': kickass.compileKickAss,
     'none': async (step) => {
         // No-op tool for platforms that handle compilation themselves
