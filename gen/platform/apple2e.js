@@ -275,13 +275,12 @@ class Apple2EPlatform {
                     }
                 },
                 // Helper to create a blob URL from disk data
-                createDiskBlobUrl: (diskData) => {
-                    // If no data provided, try to get it from the stored blob
+                createDiskBlobUrl: async (diskData, filename) => {
+                    // Get disk data from stored blob if not provided
                     if (!diskData && platform.currentDiskBlob) {
                         const blob = platform.currentDiskBlob;
-                        const blobUrl = URL.createObjectURL(blob);
-                        console.log(`Created blob URL from stored disk: ${blobUrl} (${blob.size} bytes)`);
-                        return blobUrl;
+                        const arrayBuffer = await blob.arrayBuffer();
+                        diskData = new Uint8Array(arrayBuffer);
                     }
                     if (!diskData) {
                         throw new Error('No disk data provided and no stored disk blob available. Provide diskData or load a program first.');
@@ -299,11 +298,42 @@ class Apple2EPlatform {
                     else {
                         throw new Error('Invalid disk data type. Expected Uint8Array, ArrayBuffer, or number[]');
                     }
-                    // Create a File object with .dsk extension so doLoadHTTP can recognize it
-                    const file = new File([data], 'disk.dsk', { type: 'application/octet-stream' });
-                    const blobUrl = URL.createObjectURL(file);
-                    console.log(`Created blob URL from File: ${blobUrl} (${data.length} bytes, filename: ${file.name})`);
-                    return blobUrl;
+                    // Convert to base64 - build string in chunks to avoid stack overflow
+                    // String.fromCharCode(...data) fails for large arrays, so we process in chunks
+                    let binaryString = '';
+                    const chunkSize = 8192; // Process 8KB at a time
+                    for (let i = 0; i < data.length; i += chunkSize) {
+                        const chunk = data.slice(i, i + chunkSize);
+                        // Build string from chunk without spread operator
+                        for (let j = 0; j < chunk.length; j++) {
+                            binaryString += String.fromCharCode(chunk[j]);
+                        }
+                    }
+                    const base64 = btoa(binaryString);
+                    // Get URL from serve_disk.php (has .dsk extension for doLoadHTTP)
+                    const API_BASE_URL = 'https://ide.retrogamecoders.com';
+                    const serveFilename = filename || 'disk.dsk';
+                    console.log(`Creating server URL for disk (${data.length} bytes)...`);
+                    const response = await fetch(`${API_BASE_URL}/api/apple2/serve_disk.php`, {
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            disk: base64,
+                            filename: serveFilename
+                        })
+                    });
+                    if (!response.ok) {
+                        throw new Error(`Failed to create disk URL: ${response.status} ${response.statusText}`);
+                    }
+                    const result = await response.json();
+                    if (result.error) {
+                        throw new Error(result.error);
+                    }
+                    console.log(`Created server URL: ${result.url} (${data.length} bytes)`);
+                    return result.url;
                 },
                 // Get the current disk data as Uint8Array (from stored blob)
                 getCurrentDiskData: async () => {

@@ -2444,11 +2444,13 @@ function exposeToGlobal() {
             console.log('💡 Or: const apple2 = api.apple2; apple2.reset();');
             console.log('💡 Load disk:');
             console.log('   // Option 1: Use stored disk (after loading a program)');
-            console.log('   const blobUrl = api.createDiskBlobUrl();');
+            console.log('   const diskUrl = await api.createDiskBlobUrl();');
+            console.log('   api.Apple2.doLoadHTTP(1, diskUrl);');
             console.log('   // Option 2: Provide disk data');
             console.log('   const diskData = await api.getCurrentDiskData();');
-            console.log('   const blobUrl = api.createDiskBlobUrl(diskData);');
-            console.log('   // Note: loadAjax may not work (requires UI elements). Use setBinary or direct manipulation instead.');
+            console.log('   const diskUrl = await api.createDiskBlobUrl(diskData);');
+            console.log('   api.Apple2.doLoadHTTP(1, diskUrl);');
+            console.log('   // Note: Returns server URL with .dsk extension for doLoadHTTP');
             // Test if emulator is accessible
             try {
                 const testApple2 = api.apple2;
