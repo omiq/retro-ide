@@ -1,7 +1,8 @@
 <?php
-// api/apple2/serve_disk.php - Serve disk image with .dsk extension for doLoadHTTP
+// api/apple2/serve_disk.php - Create and serve temporary .dsk files as static files
+header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
 // Handle preflight OPTIONS request
@@ -10,128 +11,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Create disk from POST data
-    header('Content-Type: application/json');
-    
-    $input = file_get_contents('php://input');
-    $data = json_decode($input, true);
-    
-    if (!$data || !isset($data['disk'])) {
-        http_response_code(400);
-        exit(json_encode(['error' => 'Missing disk data']));
-    }
-    
-    // Decode base64 disk data
-    $diskData = base64_decode($data['disk']);
-    if ($diskData === false) {
-        http_response_code(400);
-        exit(json_encode(['error' => 'Invalid base64 disk data']));
-    }
-    
-    // Create temporary file with .dsk extension
-    $tempDir = sys_get_temp_dir();
-    $filename = isset($data['filename']) ? $data['filename'] : 'disk.dsk';
-    // Ensure .dsk extension
-    if (!preg_match('/\.dsk$/i', $filename)) {
-        $filename = preg_replace('/\.[^.]+$/', '', $filename) . '.dsk';
-    }
-    
-    // Create unique file ID without dots (to avoid extension detection issues)
-    // Use timestamp + random to ensure uniqueness
-    $fileId = 'disk_' . time() . '_' . bin2hex(random_bytes(8));
-    $tempFile = $tempDir . '/apple2_disk_' . $fileId . '.dsk';
-    file_put_contents($tempFile, $diskData);
-    
-    // Generate URL to serve this file
-    // Put .dsk in the path so doLoadHTTP can detect it via split
-    // Format: /serve_disk.php/disk_ID.dsk
-    $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'];
-    $scriptPath = dirname($_SERVER['SCRIPT_NAME']);
-    // Ensure path ends with /api/apple2
-    if (!preg_match('/\/api\/apple2$/', $scriptPath)) {
-        $scriptPath = '/api/apple2';
-    }
-    $baseUrl = $protocol . '://' . $host . $scriptPath;
-    // Put file ID with .dsk extension in the path for extension detection
-    $serveUrl = $baseUrl . '/serve_disk.php/' . $fileId . '.dsk';
-    
-    // Store file info in session or temp file (simple approach: use file modification time as cleanup signal)
-    // For now, files will be cleaned up by the GET handler after 1 hour
-    
-    exit(json_encode([
-        'url' => $serveUrl,
-        'filename' => $filename,
-        'size' => strlen($diskData)
-    ]));
-} else if ($_SERVER['REQUEST_METHOD'] === 'GET' || $_SERVER['REQUEST_METHOD'] === 'HEAD') {
-    // Serve the disk file
-    // URL format: /serve_disk.php/disk_ID.dsk
-    // Extract file ID from path (everything before .dsk)
-    
-    // Set CORS headers first (before any output)
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type');
-    
-    $requestUri = $_SERVER['REQUEST_URI'];
-    $pathInfo = isset($_SERVER['PATH_INFO']) ? $_SERVER['PATH_INFO'] : '';
-    
-    // Extract file ID from path
-    if ($pathInfo) {
-        // PATH_INFO format: /disk_ID.dsk
-        $fileId = basename($pathInfo, '.dsk');
-    } else {
-        // Parse from REQUEST_URI: /serve_disk.php/disk_ID.dsk
-        if (preg_match('/\/serve_disk\.php\/([^\/]+)\.dsk/', $requestUri, $matches)) {
-            $fileId = $matches[1];
-        } else {
-            http_response_code(400);
-            header('Content-Type: text/plain');
-            exit('Invalid URL format. Expected: /serve_disk.php/disk_ID.dsk');
-        }
-    }
-    
-    // Extract filename for Content-Disposition header
-    $serveFilename = isset($_GET['filename']) ? $_GET['filename'] : 'disk.dsk';
-    $tempDir = sys_get_temp_dir();
-    $tempFile = $tempDir . '/apple2_disk_' . $fileId . '.dsk';
-    
-    if (!file_exists($tempFile)) {
-        http_response_code(404);
-        header('Content-Type: text/plain');
-        // Log for debugging (remove in production if needed)
-        error_log("serve_disk.php: File not found - ID: $fileId, Path: $tempFile");
-        exit('File not found');
-    }
-    
-    // Check if file is too old (cleanup after 1 hour)
-    if (time() - filemtime($tempFile) > 3600) {
-        @unlink($tempFile);
-        http_response_code(404);
-        header('Content-Type: text/plain');
-        exit('File expired');
-    }
-    
-    // Serve the file with proper headers
-    header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . $serveFilename . '"');
-    header('Content-Length: ' . filesize($tempFile));
-    
-    // Handle HEAD request (doLoadHTTP may check file first)
-    if ($_SERVER['REQUEST_METHOD'] === 'HEAD') {
-        exit();
-    }
-    
-    readfile($tempFile);
-    
-    // Don't delete immediately - doLoadHTTP may make multiple requests
-    // File will be cleaned up by expiration check on next request or by cron
-    exit();
-} else {
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    exit('Method not allowed');
+    exit(json_encode(['error' => 'Method not allowed. Use POST to create disk files.']));
 }
-?>
 
+// Create disk from POST data
+$input = file_get_contents('php://input');
+$data = json_decode($input, true);
+
+if (!$data || !isset($data['disk'])) {
+    http_response_code(400);
+    exit(json_encode(['error' => 'Missing disk data']));
+}
+
+// Decode base64 disk data
+$diskData = base64_decode($data['disk']);
+if ($diskData === false) {
+    http_response_code(400);
+    exit(json_encode(['error' => 'Invalid base64 disk data']));
+}
+
+// Get filename from request or use default
+$filename = isset($data['filename']) ? $data['filename'] : 'disk.dsk';
+// Ensure .dsk extension
+if (!preg_match('/\.dsk$/i', $filename)) {
+    $filename = preg_replace('/\.[^.]+$/', '', $filename) . '.dsk';
+}
+
+// Create web-accessible directory for disk files
+$scriptDir = __DIR__; // Directory where this PHP file is located
+$disksDir = $scriptDir . '/disks';
+
+// Create disks directory if it doesn't exist
+if (!is_dir($disksDir)) {
+    if (!mkdir($disksDir, 0755, true)) {
+        http_response_code(500);
+        exit(json_encode(['error' => 'Failed to create disks directory']));
+    }
+    // Add .htaccess for CORS headers on static files
+    $htaccessContent = "# Add CORS headers for .dsk files\n";
+    $htaccessContent .= "<IfModule mod_headers.c>\n";
+    $htaccessContent .= "    Header set Access-Control-Allow-Origin \"*\"\n";
+    $htaccessContent .= "    Header set Access-Control-Allow-Methods \"GET, HEAD, OPTIONS\"\n";
+    $htaccessContent .= "    Header set Access-Control-Allow-Headers \"Content-Type\"\n";
+    $htaccessContent .= "</IfModule>\n";
+    @file_put_contents($disksDir . '/.htaccess', $htaccessContent);
+}
+
+// Create unique filename without dots (to avoid extension detection issues)
+// Format: disk_TIMESTAMP_HEX.dsk
+$fileId = 'disk_' . time() . '_' . bin2hex(random_bytes(8));
+$diskFilename = $fileId . '.dsk';
+$diskPath = $disksDir . '/' . $diskFilename;
+
+// Write disk file
+if (file_put_contents($diskPath, $diskData) === false) {
+    http_response_code(500);
+    exit(json_encode(['error' => 'Failed to write disk file']));
+}
+
+// Generate URL to the static file
+$protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
+$host = $_SERVER['HTTP_HOST'];
+$scriptPath = dirname($_SERVER['SCRIPT_NAME']);
+// Ensure path ends with /api/apple2
+if (!preg_match('/\/api\/apple2$/', $scriptPath)) {
+    $scriptPath = '/api/apple2';
+}
+$baseUrl = $protocol . '://' . $host . $scriptPath;
+// URL points directly to the static .dsk file
+$serveUrl = $baseUrl . '/disks/' . $diskFilename;
+
+exit(json_encode([
+    'url' => $serveUrl,
+    'filename' => $filename,
+    'size' => strlen($diskData),
+    'fileId' => $fileId
+]));
+?>
