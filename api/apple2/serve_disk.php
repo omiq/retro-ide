@@ -37,12 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $filename = preg_replace('/\.[^.]+$/', '', $filename) . '.dsk';
     }
     
-    // Create unique file ID
-    $fileId = uniqid('disk_', true);
+    // Create unique file ID without dots (to avoid extension detection issues)
+    // Use timestamp + random to ensure uniqueness
+    $fileId = 'disk_' . time() . '_' . bin2hex(random_bytes(8));
     $tempFile = $tempDir . '/apple2_disk_' . $fileId . '.dsk';
     file_put_contents($tempFile, $diskData);
     
     // Generate URL to serve this file
+    // Put .dsk in the path so doLoadHTTP can detect it via split
+    // Format: /serve_disk.php/disk_ID.dsk
     $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
     $host = $_SERVER['HTTP_HOST'];
     $scriptPath = dirname($_SERVER['SCRIPT_NAME']);
@@ -51,7 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $scriptPath = '/api/apple2';
     }
     $baseUrl = $protocol . '://' . $host . $scriptPath;
-    $serveUrl = $baseUrl . '/serve_disk.php?id=' . urlencode($fileId) . '&filename=' . urlencode($filename);
+    // Put file ID with .dsk extension in the path for extension detection
+    $serveUrl = $baseUrl . '/serve_disk.php/' . $fileId . '.dsk';
     
     // Store file info in session or temp file (simple approach: use file modification time as cleanup signal)
     // For now, files will be cleaned up by the GET handler after 1 hour
@@ -61,14 +65,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'filename' => $filename,
         'size' => strlen($diskData)
     ]));
-} else if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+} else if ($_SERVER['REQUEST_METHOD'] === 'GET' || $_SERVER['REQUEST_METHOD'] === 'HEAD') {
     // Serve the disk file
-    if (!isset($_GET['id'])) {
-        http_response_code(400);
-        exit('Missing file ID');
+    // URL format: /serve_disk.php/disk_ID.dsk
+    // Extract file ID from path (everything before .dsk)
+    $requestUri = $_SERVER['REQUEST_URI'];
+    $pathInfo = isset($_SERVER['PATH_INFO']) ? $_SERVER['PATH_INFO'] : '';
+    
+    // Extract file ID from path
+    if ($pathInfo) {
+        // PATH_INFO format: /disk_ID.dsk
+        $fileId = basename($pathInfo, '.dsk');
+    } else {
+        // Parse from REQUEST_URI: /serve_disk.php/disk_ID.dsk
+        if (preg_match('/\/serve_disk\.php\/([^\/]+)\.dsk/', $requestUri, $matches)) {
+            $fileId = $matches[1];
+        } else {
+            http_response_code(400);
+            exit('Invalid URL format. Expected: /serve_disk.php/disk_ID.dsk');
+        }
     }
     
-    $fileId = $_GET['id'];
+    // Extract filename for Content-Disposition header
+    $serveFilename = isset($_GET['filename']) ? $_GET['filename'] : 'disk.dsk';
     $tempDir = sys_get_temp_dir();
     $tempFile = $tempDir . '/apple2_disk_' . $fileId . '.dsk';
     
@@ -87,7 +106,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     // Serve the file with proper headers
-    $serveFilename = isset($_GET['filename']) ? $_GET['filename'] : 'disk.dsk';
     header('Content-Type: application/octet-stream');
     header('Content-Disposition: attachment; filename="' . $serveFilename . '"');
     header('Content-Length: ' . filesize($tempFile));
