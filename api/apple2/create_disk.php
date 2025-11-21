@@ -441,17 +441,21 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
         }
         
         // Use AppleCommander to add binary file to the DOS master disk copy
-        // Based on tutorial Makefile technique:
-        // 1. Delete file first if it exists: -d <disk> <filename>
-        // 2. Add file as BIN type: -as <disk> <filename> BIN < <inputfile>
+        // Based on tutorial shell script (make_disk.sh):
+        // 1. Add binary as "PROG" (always use PROG, matching shell script: $AC -as program.dsk PROG <hello.bin)
+        // 2. Delete HELLO if it exists
+        // 3. Add STARTUP.BAS as HELLO
         
-        // First, delete the file if it exists (to avoid conflicts)
+        // Always use "PROG" as the filename (matching shell script)
+        $programName = 'PROG';
+        
+        // First, delete PROG if it exists (to avoid conflicts)
         if ($appleCommanderExe) {
             $deleteCmd = sprintf(
                 '%s -d %s %s 2>&1',
                 escapeshellarg($appleCommanderExe),
                 escapeshellarg(basename($dskFile)),
-                escapeshellarg($filename)
+                escapeshellarg($programName)
             );
         } else {
             $deleteCmd = sprintf(
@@ -459,7 +463,7 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
                 escapeshellarg($javaExe),
                 escapeshellarg($appleCommanderJar),
                 escapeshellarg(basename($dskFile)),
-                escapeshellarg($filename)
+                escapeshellarg($programName)
             );
         }
         exec($deleteCmd, $deleteOutput, $deleteReturnCode);
@@ -468,7 +472,7 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
         // Use the binary file as-is (AppleCommander -as can handle AppleSingle format directly)
         // The shell script uses the binary directly from cl65 output, which is AppleSingle format
         // We should do the same - use the binary as received (it already has the AppleSingle header)
-        $binFile = "{$sessionDir}/{$filename}.BIN";
+        $binFile = "{$sessionDir}/{$programName}.BIN";
         if (file_put_contents($binFile, $binaryData) === false) {
             return ['error' => "Failed to write binary file: {$binFile}"];
         }
@@ -476,13 +480,13 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
         // Use -as flag to add file as BIN type (uppercase, as per tutorial Makefile)
         // Note: AppleCommander -as syntax: -as <disk> <filename> <type> < <inputfile>
         // The filename should NOT include .BIN extension when using -as
-        // Use the binary file directly (AppleCommander handles AppleSingle format)
+        // Always use "PROG" as the filename (matching shell script)
         if ($appleCommanderExe) {
             $cmd = sprintf(
                 '%s -as %s %s BIN < %s 2>&1',
                 escapeshellarg($appleCommanderExe),
                 escapeshellarg(basename($dskFile)),
-                escapeshellarg($filename), // No .BIN extension
+                escapeshellarg($programName), // Always "PROG", no .BIN extension
                 escapeshellarg(basename($binFile))
             );
         } else {
@@ -491,7 +495,7 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
                 escapeshellarg($javaExe),
                 escapeshellarg($appleCommanderJar),
                 escapeshellarg(basename($dskFile)),
-                escapeshellarg($filename), // No .BIN extension
+                escapeshellarg($programName), // Always "PROG", no .BIN extension
                 escapeshellarg(basename($binFile))
             );
         }
@@ -523,9 +527,8 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
             exec($verifyCmd, $verifyOutput, $verifyReturnCode);
             $verifyOutputStr = implode("\n", $verifyOutput);
             
-            // Check if our filename appears in the catalog (must be exact match, not just return code)
-            $filenameUpper = strtoupper($filename);
-            $foundInCatalog = stripos($verifyOutputStr, $filenameUpper) !== false;
+              // Check if PROG appears in the catalog (must be exact match, not just return code)
+              $foundInCatalog = stripos($verifyOutputStr, 'PROG') !== false;
             
             if ($foundInCatalog && $verifyReturnCode === 0) {
                 // Binary file successfully added, now add auto-executing STARTUP.BAS
@@ -542,8 +545,9 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
                     $startupBasContent = file_get_contents($startupBasFile);
                 } else {
                     // Create STARTUP.BAS that auto-executes the binary
-                    // Format: 10 PRINT CHR$(4);"BRUN <filename>"
-                    $startupBasContent = "10 PRINT CHR$(4);\"BRUN " . strtoupper($filename) . "\"\n";
+                    // Format: 10 PRINT CHR$(4);"BRUN PROG"
+                    // Always use "PROG" to match the binary filename
+                    $startupBasContent = "10 PRINT CHR$(4);\"BRUN PROG\"\n";
                 }
                 
                 // Write STARTUP.BAS to temp file
@@ -618,7 +622,7 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
                 ];
             } else {
                 // File not found in catalog, log error and try manual method
-                error_log("AppleCommander: File '{$filenameUpper}' not found in disk catalog. Return code: {$verifyReturnCode}, Output: {$verifyOutputStr}");
+                error_log("AppleCommander: File 'PROG' not found in disk catalog. Return code: {$verifyReturnCode}, Output: {$verifyOutputStr}");
                 return createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $sessionDir, $dosMasterDisk);
             }
         } else {
