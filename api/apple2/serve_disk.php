@@ -43,9 +43,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     file_put_contents($tempFile, $diskData);
     
     // Generate URL to serve this file
-    $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . 
-               '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['SCRIPT_NAME']);
-    $serveUrl = $baseUrl . '/serve_disk.php?id=' . $fileId . '&filename=' . urlencode($filename);
+    $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'];
+    $scriptPath = dirname($_SERVER['SCRIPT_NAME']);
+    // Ensure path ends with /api/apple2
+    if (!preg_match('/\/api\/apple2$/', $scriptPath)) {
+        $scriptPath = '/api/apple2';
+    }
+    $baseUrl = $protocol . '://' . $host . $scriptPath;
+    $serveUrl = $baseUrl . '/serve_disk.php?id=' . urlencode($fileId) . '&filename=' . urlencode($filename);
     
     // Store file info in session or temp file (simple approach: use file modification time as cleanup signal)
     // For now, files will be cleaned up by the GET handler after 1 hour
@@ -68,6 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (!file_exists($tempFile)) {
         http_response_code(404);
+        // Log for debugging (remove in production if needed)
+        error_log("serve_disk.php: File not found - ID: $fileId, Path: $tempFile");
         exit('File not found');
     }
     
@@ -83,10 +91,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/octet-stream');
     header('Content-Disposition: attachment; filename="' . $serveFilename . '"');
     header('Content-Length: ' . filesize($tempFile));
+    
+    // Handle HEAD request (doLoadHTTP may check file first)
+    if ($_SERVER['REQUEST_METHOD'] === 'HEAD') {
+        exit();
+    }
+    
     readfile($tempFile);
     
-    // Clean up after serving
-    @unlink($tempFile);
+    // Don't delete immediately - doLoadHTTP may make multiple requests
+    // File will be cleaned up by expiration check on next request or by cron
     exit();
 } else {
     http_response_code(405);
