@@ -469,12 +469,16 @@ class Apple2EPlatform {
         const isBinary = this.isCompiledBinary(rom);
         if (isBinary) {
             console.log('Apple2EPlatform: Detected compiled binary, creating disk image');
-            this.loadCompiledProgram(title, rom);
+            this.loadCompiledProgram(title, rom).catch(err => {
+                console.error('Apple2EPlatform: Error loading compiled program:', err);
+            });
         }
         else {
             console.log('Apple2EPlatform: Detected BASIC program, creating disk image');
             // For BASIC programs, create a disk with the BASIC program using AppleCommander
-            this.loadBasicProgram(title, rom);
+            this.loadBasicProgram(title, rom).catch(err => {
+                console.error('Apple2EPlatform: Error loading BASIC program:', err);
+            });
         }
     }
     isCompiledBinary(data) {
@@ -688,9 +692,11 @@ class Apple2EPlatform {
         // Decode BASIC program text
         const basicText = new TextDecoder().decode(programData);
         console.log(`Apple2EPlatform: Creating bootable disk for BASIC program ${filename}, ${basicText.length} bytes`);
+        console.log(`Apple2EPlatform: BASIC program preview:`, basicText.substring(0, 200));
         try {
             // Call PHP API to create bootable disk with BASIC program
             const API_BASE_URL = 'https://ide.retrogamecoders.com';
+            console.log(`Apple2EPlatform: Calling PHP API to create disk with BASIC program...`);
             const response = await fetch(`${API_BASE_URL}/api/apple2/create_disk.php`, {
                 method: 'POST',
                 mode: 'cors',
@@ -705,12 +711,21 @@ class Apple2EPlatform {
                     sessionID: `apple2_${Date.now()}`
                 })
             });
+            console.log(`Apple2EPlatform: API response status: ${response.status}`);
             if (!response.ok) {
-                throw new Error(`API error: ${response.status} ${response.statusText}`);
+                const errorText = await response.text();
+                console.error(`Apple2EPlatform: API error response:`, errorText);
+                throw new Error(`API error: ${response.status} ${response.statusText} - ${errorText}`);
             }
             const result = await response.json();
+            console.log(`Apple2EPlatform: API result:`, result);
             if (result.error) {
+                console.error(`Apple2EPlatform: API returned error:`, result.error);
                 throw new Error(result.error);
+            }
+            if (!result.disk) {
+                console.error(`Apple2EPlatform: API result missing disk data:`, result);
+                throw new Error('API response missing disk data');
             }
             // Decode disk image
             const diskData = Uint8Array.from(atob(result.disk), c => c.charCodeAt(0));
@@ -720,6 +735,7 @@ class Apple2EPlatform {
             new Uint8Array(diskBuffer).set(diskData);
             this.currentDiskBlob = new Blob([diskBuffer], { type: 'application/octet-stream' });
             console.log(`Apple2EPlatform: Disk blob stored for download: ${this.currentDiskBlob.size} bytes`);
+            console.log(`Apple2EPlatform: currentDiskBlob is now:`, this.currentDiskBlob ? 'set' : 'null');
             // Send disk to iframe - it contains the BASIC program
             this.iframe.contentWindow.postMessage({
                 type: 'load_disk',
@@ -736,8 +752,13 @@ class Apple2EPlatform {
         }
         catch (error) {
             console.error('Apple2EPlatform: Error creating bootable disk via PHP API:', error);
+            console.error('Apple2EPlatform: Error details:', {
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
+            });
             this.isLoadingProgram = false;
-            throw error;
+            // Don't throw - just log the error so the UI doesn't break
+            // The user can still try to download manually if needed
         }
     }
     async loadCompiledProgram(title, programData) {
