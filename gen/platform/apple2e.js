@@ -325,10 +325,11 @@ class Apple2EPlatform {
                             filename: serveFilename
                         })
                     });
+                    const result = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }));
                     if (!response.ok) {
-                        throw new Error(`Failed to create disk URL: ${response.status} ${response.statusText}`);
+                        const errorMsg = result.error || `HTTP ${response.status}: ${response.statusText}`;
+                        throw new Error(`Failed to create disk URL: ${errorMsg}`);
                     }
-                    const result = await response.json();
                     if (result.error) {
                         throw new Error(result.error);
                     }
