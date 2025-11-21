@@ -64,14 +64,6 @@ if (!is_dir($disksDir)) {
         $error = error_get_last();
         jsonError('Failed to create disks directory: ' . ($error ? $error['message'] : 'Unknown error') . ' (Path: ' . $disksDir . ')');
     }
-    // Add .htaccess for CORS headers on static files
-    $htaccessContent = "# Add CORS headers for .dsk files\n";
-    $htaccessContent .= "<IfModule mod_headers.c>\n";
-    $htaccessContent .= "    Header set Access-Control-Allow-Origin \"*\"\n";
-    $htaccessContent .= "    Header set Access-Control-Allow-Methods \"GET, HEAD, OPTIONS\"\n";
-    $htaccessContent .= "    Header set Access-Control-Allow-Headers \"Content-Type\"\n";
-    $htaccessContent .= "</IfModule>\n";
-    @file_put_contents($disksDir . '/.htaccess', $htaccessContent);
 }
 
 // Check if directory is writable
@@ -96,7 +88,7 @@ if ($bytesWritten !== strlen($diskData)) {
     jsonError('Disk file write incomplete: wrote ' . $bytesWritten . ' of ' . strlen($diskData) . ' bytes');
 }
 
-// Generate URL to the static file
+// Generate URL to serve the file through PHP (for CORS headers)
 $protocol = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
 $host = $_SERVER['HTTP_HOST'];
 $scriptPath = dirname($_SERVER['SCRIPT_NAME']);
@@ -105,8 +97,9 @@ if (!preg_match('/\/api\/apple2$/', $scriptPath)) {
     $scriptPath = '/api/apple2';
 }
 $baseUrl = $protocol . '://' . $host . $scriptPath;
-// URL points directly to the static .dsk file
-$serveUrl = $baseUrl . '/disks/' . $diskFilename;
+// URL points to PHP script that serves the file with CORS headers
+// Format: /get_disk.php/disk_ID.dsk (so .dsk is in the path for extension detection)
+$serveUrl = $baseUrl . '/get_disk.php/' . $diskFilename;
 
 exit(json_encode([
     'url' => $serveUrl,
