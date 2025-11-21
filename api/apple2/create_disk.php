@@ -648,8 +648,9 @@ function createBootableDisk($binaryData, $basicText, $filename, $loadAddress, $r
                     
                     @unlink($startupBasTemp);
                 } else if ($basicText !== null) {
-                    // For BASIC files, create STARTUP.BAS that loads and runs the BASIC program
-                    $startupBasContent = "10 PRINT CHR$(4);\"LOAD {$programName}\"\n20 RUN\n";
+                    // For BASIC files, create STARTUP.BAS that runs the BASIC program
+                    // RUN automatically loads and executes the program
+                    $startupBasContent = "10 PRINT CHR$(4);\"RUN {$programName}\"\n";
                     
                     $startupBasTemp = "{$sessionDir}/STARTUP.BAS";
                     if (file_put_contents($startupBasTemp, $startupBasContent) === false) {
