@@ -23,7 +23,7 @@ import { alertError, alertInfo, fatalError, setWaitDialog, setWaitProgress } fro
 import { _importProjectFromGithub, _loginToGithub, _logoutOfGithub, _publishProjectToGithub, _pullProjectFromGithub, _pushProjectToGithub, _removeRepository, importProjectFromGithub } from "./sync";
 import { _registerUser, _loginUser, _logoutUser, updateApiAuthUI, toggleApiUserMenu, _createApiProject, _listApiProjects, _pushToApi, _pullFromApi } from "./apisync";
 import { gaEvent, gaPageView } from "./analytics";
-import { _downloadAllFilesZipFile, _downloadCassetteFile, _downloadProjectZipFile, _downloadROMImage, _downloadSourceFile, _downloadSymFile, _getCassetteFunction, _recordVideo, _shareEmbedLink } from "./shareexport";
+import { _downloadAllFilesZipFile, _downloadCassetteFile, _downloadDiskImage, _downloadProjectZipFile, _downloadROMImage, _downloadSourceFile, _downloadSymFile, _getCassetteFunction, _recordVideo, _shareEmbedLink } from "./shareexport";
 
 // external libs (TODO)
 declare var Tour;
@@ -1583,8 +1583,14 @@ function setupDebugControls() {
   else
     $("#item_debug_expr").hide();
   $("#item_download_rom").click(_downloadROMImage);
+  $("#item_download_disk").click(_downloadDiskImage);
   $("#item_download_file").click(_downloadSourceFile);
   $("#item_download_zip").click(_downloadProjectZipFile);
+  if (platform.getDownloadDiskFile) {
+    $("#item_download_disk").show();
+  } else {
+    $("#item_download_disk").hide();
+  }
   if (platform.getDebugSymbolFile) {
     $("#item_download_sym").click(_downloadSymFile);
   } else {

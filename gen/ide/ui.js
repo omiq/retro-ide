@@ -1545,8 +1545,15 @@ function setupDebugControls() {
     else
         $("#item_debug_expr").hide();
     $("#item_download_rom").click(shareexport_1._downloadROMImage);
+    $("#item_download_disk").click(shareexport_1._downloadDiskImage);
     $("#item_download_file").click(shareexport_1._downloadSourceFile);
     $("#item_download_zip").click(shareexport_1._downloadProjectZipFile);
+    if (exports.platform.getDownloadDiskFile) {
+        $("#item_download_disk").show();
+    }
+    else {
+        $("#item_download_disk").hide();
+    }
     if (exports.platform.getDebugSymbolFile) {
         $("#item_download_sym").click(shareexport_1._downloadSymFile);
     }

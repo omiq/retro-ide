@@ -150,6 +150,7 @@ export interface Platform {
   sourceFileFetch?: (path:string) => FileData;
 
   getDownloadFile?() : {extension:string, blob:Blob};
+  getDownloadDiskFile?() : {extension:string, blob:Blob};
   getDebugSymbolFile?() : {extension:string, blob:Blob};
 }
 

@@ -16,6 +16,7 @@ export class Apple2EPlatform implements Platform {
   private lastLoadedProgram: string | null = null;
   private isLoadingProgram = false;
   private currentDiskBlob: Blob | null = null; // Store the disk image for download
+  private currentBinaryBlob: Blob | null = null; // Store the compiled binary for download
 
   constructor(mainElement: HTMLElement) {
     this.mainElement = mainElement;
@@ -160,8 +161,21 @@ export class Apple2EPlatform implements Platform {
   }
   
   getDownloadFile(): { extension: string, blob: Blob } | undefined {
-    // Return the disk image if available
-    console.log(`Apple2EPlatform: getDownloadFile() called, currentDiskBlob:`, this.currentDiskBlob ? `${this.currentDiskBlob.size} bytes` : 'null');
+    // Return the binary file (for "Download Program")
+    console.log(`Apple2EPlatform: getDownloadFile() called, currentBinaryBlob:`, this.currentBinaryBlob ? `${this.currentBinaryBlob.size} bytes` : 'null');
+    if (this.currentBinaryBlob) {
+      return {
+        extension: '.bin',
+        blob: this.currentBinaryBlob
+      };
+    }
+    console.log('Apple2EPlatform: No binary blob available for download');
+    return undefined;
+  }
+
+  getDownloadDiskFile(): { extension: string, blob: Blob } | undefined {
+    // Return the disk image (for "Download Disk")
+    console.log(`Apple2EPlatform: getDownloadDiskFile() called, currentDiskBlob:`, this.currentDiskBlob ? `${this.currentDiskBlob.size} bytes` : 'null');
     if (this.currentDiskBlob) {
       return {
         extension: '.dsk',
@@ -494,6 +508,12 @@ export class Apple2EPlatform implements Platform {
       return;
     }
     
+    // Store the binary blob for download
+    // Create a copy of the Uint8Array to ensure it's a proper ArrayBuffer
+    const romCopy = new Uint8Array(rom);
+    this.currentBinaryBlob = new Blob([romCopy], { type: 'application/octet-stream' });
+    console.log(`Apple2EPlatform: Binary blob stored for download: ${this.currentBinaryBlob.size} bytes`);
+    
     // Detect if this is a compiled binary (C program) or BASIC text
     // Compiled binaries are typically > 100 bytes and don't decode to valid ASCII BASIC
     const isBinary = this.isCompiledBinary(rom);
@@ -814,7 +834,13 @@ export class Apple2EPlatform implements Platform {
     
     try {
       // Call PHP API to create bootable disk
-      const API_BASE_URL = 'https://ide.retrogamecoders.com'; // Or from config
+      // Use localhost API when running locally, otherwise use production server
+      const isLocalhost = window.location.hostname === 'localhost' || 
+                         window.location.hostname === '127.0.0.1' ||
+                         window.location.hostname === '';
+      const API_BASE_URL = isLocalhost 
+        ? window.location.origin  // Use same origin (localhost) for local development
+        : 'https://ide.retrogamecoders.com';  // Production server
       const binaryBase64 = btoa(String.fromCharCode(...actualProgramData));
       
       const response = await fetch(`${API_BASE_URL}/api/apple2/create_disk.php`, {

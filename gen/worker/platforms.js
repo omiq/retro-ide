@@ -223,7 +223,7 @@ exports.PLATFORM_PARAMS = {
     'apple2e': {
         arch: '6502',
         define: ['__APPLE2__'],
-        cfgfile: 'apple2.cfg',
+        cfgfile: 'apple2enh.cfg', // Use apple2enh target (Apple IIe Enhanced) as per tutorial
         libargs: ['apple2.lib'],
         acmeargs: ['-f', 'apple'],
     },

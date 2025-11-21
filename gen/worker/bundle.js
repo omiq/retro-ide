@@ -2805,7 +2805,7 @@
         "apple2e": {
           arch: "6502",
           define: ["__APPLE2__"],
-          cfgfile: "apple2.cfg",
+          cfgfile: "apple2enh.cfg",
           libargs: ["apple2.lib"],
           acmeargs: ["-f", "apple"]
         },

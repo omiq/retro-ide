@@ -194,6 +194,33 @@ export function _downloadROMImage(e) {
     }
 }
 
+export function _downloadDiskImage(e) {
+    console.log("_downloadDiskImage called, platform:", platform_id);
+    
+    if (getCurrentOutput() == null) {
+        alertError("Please finish compiling with no errors before downloading disk.");
+        return true;
+    }
+    
+    // Check if platform has getDownloadDiskFile method (for Apple IIe)
+    if (platform.getDownloadDiskFile) {
+        var dl = platform.getDownloadDiskFile();
+        console.log("platform.getDownloadDiskFile() returned:", dl);
+        if (dl) {
+            var prefix = getFilenamePrefix(getCurrentMainFilename());
+            console.log("Downloading disk:", prefix + dl.extension);
+            saveAs(dl.blob, prefix + dl.extension);
+            // Track download
+            gaEvent('download', 'disk', platform_id);
+        } else {
+            console.log("getDownloadDiskFile() returned null/undefined");
+            alertError("No downloadable disk available. Make sure you have compiled a program.");
+        }
+    } else {
+        alertError(`The "${platform_id}" platform doesn't support disk downloads.`);
+    }
+}
+
 export function _downloadSourceFile(e) {
     var text = projectWindows.getCurrentText();
     if (!text) return false;

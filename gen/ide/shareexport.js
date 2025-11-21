@@ -28,6 +28,7 @@ exports._downloadCassetteFile_vcs = _downloadCassetteFile_vcs;
 exports._getCassetteFunction = _getCassetteFunction;
 exports._downloadCassetteFile = _downloadCassetteFile;
 exports._downloadROMImage = _downloadROMImage;
+exports._downloadDiskImage = _downloadDiskImage;
 exports._downloadSourceFile = _downloadSourceFile;
 exports._downloadProjectZipFile = _downloadProjectZipFile;
 exports._downloadSymFile = _downloadSymFile;
@@ -220,6 +221,32 @@ function _downloadROMImage(e) {
     }
     else {
         (0, dialogs_1.alertError)(`The "${ui_1.platform_id}" platform doesn't have downloadable ROMs.`);
+    }
+}
+function _downloadDiskImage(e) {
+    console.log("_downloadDiskImage called, platform:", ui_1.platform_id);
+    if ((0, ui_1.getCurrentOutput)() == null) {
+        (0, dialogs_1.alertError)("Please finish compiling with no errors before downloading disk.");
+        return true;
+    }
+    // Check if platform has getDownloadDiskFile method (for Apple IIe)
+    if (ui_1.platform.getDownloadDiskFile) {
+        var dl = ui_1.platform.getDownloadDiskFile();
+        console.log("platform.getDownloadDiskFile() returned:", dl);
+        if (dl) {
+            var prefix = (0, util_1.getFilenamePrefix)((0, ui_1.getCurrentMainFilename)());
+            console.log("Downloading disk:", prefix + dl.extension);
+            (0, file_saver_1.saveAs)(dl.blob, prefix + dl.extension);
+            // Track download
+            (0, analytics_1.gaEvent)('download', 'disk', ui_1.platform_id);
+        }
+        else {
+            console.log("getDownloadDiskFile() returned null/undefined");
+            (0, dialogs_1.alertError)("No downloadable disk available. Make sure you have compiled a program.");
+        }
+    }
+    else {
+        (0, dialogs_1.alertError)(`The "${ui_1.platform_id}" platform doesn't support disk downloads.`);
     }
 }
 function _downloadSourceFile(e) {

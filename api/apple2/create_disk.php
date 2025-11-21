@@ -70,6 +70,127 @@ $result = createBootableDisk($binaryBytes, $filename, $loadAddress, $runAddress,
 echo json_encode($result);
 
 /**
+ * Ensure there's enough free space on the DOS master disk by deleting non-essential files if needed
+ * Returns the modified disk image
+ */
+function ensureFreeSpace($disk, $requiredSectors) {
+    $VTOC_OFFSET = 0; // Track 0, Sector 0
+    $BYTES_PER_SECTOR = 256;
+    $SECTORS_PER_TRACK = 16;
+    $TRACKS = 35;
+    
+    // Count free sectors by checking VTOC bitmap
+    // Bitmap starts at offset 0x04, each bit represents a sector
+    $freeSectors = 0;
+    for ($track = 0; $track < $TRACKS; $track++) {
+        for ($sector = 0; $sector < $SECTORS_PER_TRACK; $sector++) {
+            $bitmapByte = 0x04 + (($track * $SECTORS_PER_TRACK + $sector) >> 3);
+            $bitmapBit = 7 - (($track * $SECTORS_PER_TRACK + $sector) & 7);
+            if ($bitmapByte < 0x27) {
+                $bitmapValue = ord($disk[$VTOC_OFFSET + $bitmapByte]);
+                if (!($bitmapValue & (1 << $bitmapBit))) {
+                    $freeSectors++;
+                }
+            }
+        }
+    }
+    
+    // If we have enough free space, return disk as-is
+    if ($freeSectors >= $requiredSectors) {
+        return $disk;
+    }
+    
+    // Need to free up space - delete some non-essential files
+    // Files to delete (in order of preference - keep DOS system files):
+    // - README files
+    // - Utility programs that aren't essential for booting
+    // - Documentation files
+    $filesToDelete = [
+        'VIEW.README',
+        'README',
+        'MAKE.SMALL.P8',
+        'MINIBAS',
+        'FASTDSK.CONF',
+        '*ADTPRO2.0.2',
+        '*CAT.DOCTOR',
+        '*BLOCKWARDEN',
+        '*MR.FIXIT.Y2K',
+        '*UNSHRINK',
+        '*COPYIIPLUS.8.4'
+    ];
+    
+    $catalogTrack = 17;
+    $catalogSector = 15;
+    $catalogOffset = ($catalogTrack * $SECTORS_PER_TRACK + $catalogSector) * $BYTES_PER_SECTOR;
+    
+    // Read file count
+    $fileCount = ord($disk[$catalogOffset + 0x03]);
+    $fileEntrySize = 35;
+    
+    $deletedSectors = 0;
+    foreach ($filesToDelete as $fileToDelete) {
+        if ($freeSectors + $deletedSectors >= $requiredSectors) {
+            break; // We have enough space now
+        }
+        
+        // Find and delete this file
+        for ($i = 0; $i < $fileCount; $i++) {
+            $entryOffset = $catalogOffset + 0x0B + ($i * $fileEntrySize);
+            
+            // Read filename (30 bytes)
+            $entryFilename = '';
+            for ($j = 0; $j < 30; $j++) {
+                $byte = ord($disk[$entryOffset + $j]);
+                if ($byte === 0 || $byte === 0xA0) break; // End of filename or space
+                $entryFilename .= chr($byte);
+            }
+            $entryFilename = trim($entryFilename);
+            
+            // Check if this is the file we want to delete
+            if (stripos($entryFilename, $fileToDelete) === 0 || 
+                (strpos($fileToDelete, '*') === 0 && stripos($entryFilename, substr($fileToDelete, 1)) === 0)) {
+                
+                // Get file size in sectors
+                $fileSectors = ord($disk[$entryOffset + 0x21]) | (ord($disk[$entryOffset + 0x22]) << 8);
+                
+                // Get track and sector where file starts
+                $fileTrack = ord($disk[$entryOffset + 0x1E]);
+                $fileSector = ord($disk[$entryOffset + 0x1F]);
+                
+                // Mark file entry as deleted (set track to 0)
+                $disk[$entryOffset + 0x1E] = chr(0);
+                
+                // Free up sectors in VTOC bitmap
+                $currentTrack = $fileTrack;
+                $currentSector = $fileSector;
+                for ($s = 0; $s < $fileSectors; $s++) {
+                    $bitmapByte = 0x04 + (($currentTrack * $SECTORS_PER_TRACK + $currentSector) >> 3);
+                    $bitmapBit = 7 - (($currentTrack * $SECTORS_PER_TRACK + $currentSector) & 7);
+                    if ($bitmapByte < 0x27) {
+                        $bitmapValue = ord($disk[$VTOC_OFFSET + $bitmapByte]);
+                        $disk[$VTOC_OFFSET + $bitmapByte] = chr($bitmapValue & ~(1 << $bitmapBit));
+                    }
+                    
+                    // Follow sector chain (DOS 3.3 files are linked)
+                    $sectorOffset = ($currentTrack * $SECTORS_PER_TRACK + $currentSector) * $BYTES_PER_SECTOR;
+                    $nextTrack = ord($disk[$sectorOffset + 0x01]);
+                    $nextSector = ord($disk[$sectorOffset + 0x02]);
+                    
+                    if ($nextTrack === 0 || $nextTrack >= $TRACKS) break;
+                    $currentTrack = $nextTrack;
+                    $currentSector = $nextSector;
+                }
+                
+                $deletedSectors += $fileSectors;
+                break; // Found and deleted this file, move to next
+            }
+        }
+    }
+    
+    return $disk;
+}
+
+/**
  * Create a bootable Apple II DOS 3.3 disk image from binary data
  * Strategy: Copy DOS master disk and add program binary to it
  */
@@ -94,55 +215,95 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
         return ['error' => "Failed to write binary file: {$binFile}"];
     }
     
-    // Path to AppleCommander (check api/apple2 directory first)
-    // Try common names: AppleCommander.jar, AppleCommander-*.jar
-    $appleCommanderJar = null;
-    $possibleJarNames = [
-        __DIR__ . '/AppleCommander.jar',
-        __DIR__ . '/AppleCommander-1.3.5-ac.jar',
-        __DIR__ . '/AppleCommander-*.jar' // Will need glob
+    // Find Java executable (try specific paths first, then fall back to 'java' in PATH)
+    $javaExe = null;
+    $javaPaths = [
+        '/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin/java', // Temurin 25 (LTS) - preferred
+        '/opt/homebrew/opt/openjdk@17/bin/java',  // Java 17 LTS
+        '/opt/homebrew/opt/openjdk@21/bin/java', // Java 21 LTS
+        '/opt/homebrew/Cellar/openjdk/24.0.2/bin/java', // Java 24
+        '/usr/bin/java', // System Java
+        'java' // Fallback to PATH
     ];
+    foreach ($javaPaths as $path) {
+        if ($path === 'java' || (file_exists($path) && is_executable($path))) {
+            $javaExe = $path;
+            break;
+        }
+    }
+    if (!$javaExe) {
+        $javaExe = 'java'; // Final fallback
+    }
     
-    // Check exact names first
-    foreach (['AppleCommander.jar', 'AppleCommander-1.3.5-ac.jar'] as $name) {
-        $path = __DIR__ . '/' . $name;
-        if (file_exists($path)) {
-            $appleCommanderJar = $path;
+    // Path to AppleCommander (check for native binary first, then JAR files)
+    // Native binary (macOS/Linux) - preferred if available
+    $appleCommanderExe = null;
+    $possibleNativePaths = [
+        '/home/ide/htdocs/ac-linux',  // Server Linux location
+        '/Applications/AppleCommander',  // macOS native location
+        '/applications/AppleCommander',  // Alternative macOS location
+        '/usr/local/bin/AppleCommander',  // Linux/Unix
+        '/opt/applecommander/AppleCommander',
+        __DIR__ . '/AppleCommander',
+        'AppleCommander'  // Fallback to PATH
+    ];
+    foreach ($possibleNativePaths as $path) {
+        if ($path === 'AppleCommander' || (file_exists($path) && is_executable($path))) {
+            $appleCommanderExe = $path;
             break;
         }
     }
     
-    // If not found, try glob pattern
-    if (!$appleCommanderJar) {
-        $globPattern = __DIR__ . '/AppleCommander-*.jar';
-        $matches = glob($globPattern);
-        if (!empty($matches)) {
-            $appleCommanderJar = $matches[0]; // Use first match
-        }
-    }
-    
-    // Try other locations if not found in api/apple2
-    if (!$appleCommanderJar) {
-        $possiblePaths = [
-            '/home/ide/htdocs/AppleCommander.jar',
-            __DIR__ . '/../../../AppleCommander.jar',
-            '/usr/local/bin/AppleCommander.jar',
-            '/opt/applecommander/AppleCommander.jar',
-            __DIR__ . '/../../tools/AppleCommander.jar'
+    // Path to AppleCommander JAR (if native binary not found)
+    $appleCommanderJar = null;
+    if (!$appleCommanderExe) {
+        $possibleJarNames = [
+            __DIR__ . '/AppleCommander.jar',
+            __DIR__ . '/AppleCommander-1.3.5-ac.jar',
+            __DIR__ . '/AppleCommander-*.jar' // Will need glob
         ];
-        foreach ($possiblePaths as $path) {
+        
+        // Check exact names first
+        foreach (['AppleCommander.jar', 'AppleCommander-1.3.5-ac.jar'] as $name) {
+            $path = __DIR__ . '/' . $name;
             if (file_exists($path)) {
                 $appleCommanderJar = $path;
                 break;
+            }
+        }
+        
+        // If not found, try glob pattern
+        if (!$appleCommanderJar) {
+            $globPattern = __DIR__ . '/AppleCommander-*.jar';
+            $matches = glob($globPattern);
+            if (!empty($matches)) {
+                $appleCommanderJar = $matches[0]; // Use first match
+            }
+        }
+        
+        // Try other locations if not found in api/apple2
+        if (!$appleCommanderJar) {
+            $possiblePaths = [
+                '/home/ide/htdocs/AppleCommander.jar',  // Server location
+                __DIR__ . '/../../../AppleCommander.jar',
+                '/usr/local/bin/AppleCommander.jar',
+                '/opt/applecommander/AppleCommander.jar',
+                __DIR__ . '/../../tools/AppleCommander.jar'
+            ];
+            foreach ($possiblePaths as $path) {
+                if (file_exists($path)) {
+                    $appleCommanderJar = $path;
+                    break;
+                }
             }
         }
     }
     
     // Path to DOS master disk (check for .dsk file first, then JSON)
     $dosMasterDisk = null;
-    // Try template.dsk or dos33master.dsk in api/apple2 directory
+    // Try DOS3.3.dsk first (as per working shell script), then template.dsk or dos33master.dsk
     $dosMasterDsk = null;
-    foreach (['template.dsk', 'dos33master.dsk'] as $name) {
+    foreach (['DOS3.3.dsk', 'template.dsk', 'dos33master.dsk'] as $name) {
         $path = __DIR__ . '/' . $name;
         if (file_exists($path)) {
             $dosMasterDsk = $path;
@@ -202,99 +363,276 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
         return ['error' => "Failed to write DOS master disk copy to: {$dskFile}"];
     }
     
-    // If AppleCommander is available, use it to add the binary file
-    if ($appleCommanderJar && file_exists($appleCommanderJar)) {
-        // Use AppleCommander to add binary file to the DOS master disk copy
-        // ac -p puts a file on the disk, -b specifies binary file type with load/run addresses
-        // Format: ac -p <disk> <filename> -b <loadaddr> <runaddr>
-        // Note: AppleCommander expects the binary file to be in the current directory
+    // If AppleCommander is available (native binary or JAR), use it to add the binary file
+    $appleCommanderAvailable = ($appleCommanderExe && is_executable($appleCommanderExe)) || 
+                               ($appleCommanderJar && file_exists($appleCommanderJar));
+    if ($appleCommanderAvailable) {
+        // First, check if there's free space, and if not, delete some files
         $originalDir = getcwd();
         if (!chdir($sessionDir)) {
             return ['error' => "Failed to change to session directory: {$sessionDir}"];
         }
         
-        // Use AppleCommander to add binary file
-        // Based on Makefile: java -jar $(AC) -as $(NAME).po $(NAME) bin < $(NAME).apple2
-        // But we need load/run addresses, so we use -p with -b flag
-        // Format: ac -p <disk> <filename> -b <loadaddr> <runaddr> < <inputfile>
-        // Note: AppleCommander 1.3.5+ uses -b flag for binary files with addresses
-        
-        // First, try the standard syntax with -b flag
-        $cmd = sprintf(
-            'java -jar %s -p %s %s.BIN -b 0x%x 0x%x < %s 2>&1',
-            escapeshellarg($appleCommanderJar),
-            escapeshellarg(basename($dskFile)),
-            escapeshellarg($filename),
-            $loadAddress,
-            $runAddress,
-            escapeshellarg(basename($binFile))
-        );
-        
-        exec($cmd, $output, $returnCode);
-        $errorOutput = implode("\n", $output);
-        
-        // If that fails, try without hex prefix (decimal)
-        if ($returnCode !== 0) {
-            $cmd2 = sprintf(
-                'java -jar %s -p %s %s.BIN -b %d %d < %s 2>&1',
-                escapeshellarg($appleCommanderJar),
-                escapeshellarg(basename($dskFile)),
-                escapeshellarg($filename),
-                $loadAddress,
-                $runAddress,
-                escapeshellarg(basename($binFile))
+        // List files to check free space
+        if ($appleCommanderExe) {
+            // Use native binary
+            $listCmd = sprintf(
+                '%s -l %s 2>&1',
+                escapeshellarg($appleCommanderExe),
+                escapeshellarg(basename($dskFile))
             );
+        } else {
+            // Use JAR file
+            $listCmd = sprintf(
+                '%s -jar %s -l %s 2>&1',
+                escapeshellarg($javaExe),
+                escapeshellarg($appleCommanderJar),
+                escapeshellarg(basename($dskFile))
+            );
+        }
+        exec($listCmd, $listOutput, $listReturnCode);
+        $listOutputStr = implode("\n", $listOutput);
+        
+        // Check if disk is full (look for "BLOCKS FREE: 0" or similar)
+        $isFull = (stripos($listOutputStr, 'BLOCKS FREE: 0') !== false) || 
+                  (stripos($listOutputStr, 'FREE: 0') !== false) ||
+                  (preg_match('/FREE:\s*0\s*BLOCKS?/i', $listOutputStr));
+        
+        if ($isFull) {
+            // Delete some non-essential files to make room
+            $filesToDelete = [
+                'VIEW.README',
+                'README',
+                'MAKE.SMALL.P8',
+                'MINIBAS',
+                'FASTDSK.CONF'
+            ];
             
-            exec($cmd2, $output2, $returnCode2);
-            if ($returnCode2 === 0) {
-                $output = $output2;
-                $returnCode = $returnCode2;
-                $errorOutput = implode("\n", $output);
-            } else {
-                // Try alternative: -as flag (adds file but may not preserve addresses)
-                // This is what the Makefile uses, but it doesn't set load/run addresses
-                $cmd3 = sprintf(
-                    'java -jar %s -as %s %s bin < %s 2>&1',
-                    escapeshellarg($appleCommanderJar),
-                    escapeshellarg(basename($dskFile)),
-                    escapeshellarg($filename),
-                    escapeshellarg(basename($binFile))
-                );
+            foreach ($filesToDelete as $fileToDelete) {
+                // Try to delete the file
+                if ($appleCommanderExe) {
+                    $deleteCmd = sprintf(
+                        '%s -d %s %s 2>&1',
+                        escapeshellarg($appleCommanderExe),
+                        escapeshellarg(basename($dskFile)),
+                        escapeshellarg($fileToDelete)
+                    );
+                } else {
+                    $deleteCmd = sprintf(
+                        '%s -jar %s -d %s %s 2>&1',
+                        escapeshellarg($javaExe),
+                        escapeshellarg($appleCommanderJar),
+                        escapeshellarg(basename($dskFile)),
+                        escapeshellarg($fileToDelete)
+                    );
+                }
+                exec($deleteCmd, $deleteOutput, $deleteReturnCode);
                 
-                exec($cmd3, $output3, $returnCode3);
-                if ($returnCode3 === 0) {
-                    // File added but addresses may be wrong - log warning
-                    error_log("AppleCommander: File added with -as flag, load/run addresses may not be set correctly");
-                    $output = $output3;
-                    $returnCode = $returnCode3;
-                    $errorOutput = implode("\n", $output);
+                // Check if we now have free space
+                exec($listCmd, $listOutput2, $listReturnCode2);
+                $listOutputStr2 = implode("\n", $listOutput2);
+                $stillFull = (stripos($listOutputStr2, 'BLOCKS FREE: 0') !== false) || 
+                            (stripos($listOutputStr2, 'FREE: 0') !== false);
+                
+                if (!$stillFull) {
+                    break; // We have free space now
                 }
             }
         }
         
+        // Use AppleCommander to add binary file to the DOS master disk copy
+        // Based on tutorial Makefile technique:
+        // 1. Delete file first if it exists: -d <disk> <filename>
+        // 2. Add file as BIN type: -as <disk> <filename> BIN < <inputfile>
+        
+        // First, delete the file if it exists (to avoid conflicts)
+        if ($appleCommanderExe) {
+            $deleteCmd = sprintf(
+                '%s -d %s %s 2>&1',
+                escapeshellarg($appleCommanderExe),
+                escapeshellarg(basename($dskFile)),
+                escapeshellarg($filename)
+            );
+        } else {
+            $deleteCmd = sprintf(
+                '%s -jar %s -d %s %s 2>&1',
+                escapeshellarg($javaExe),
+                escapeshellarg($appleCommanderJar),
+                escapeshellarg(basename($dskFile)),
+                escapeshellarg($filename)
+            );
+        }
+        exec($deleteCmd, $deleteOutput, $deleteReturnCode);
+        // Ignore delete errors - file might not exist, which is fine
+        
+        // Create properly formatted binary file for DOS 3.3
+        // DOS 3.3 binary files need load address at start and run address at end
+        $formattedBinFile = "{$sessionDir}/{$filename}_formatted.BIN";
+        $formattedBinary = '';
+        // Add load address (2 bytes, little-endian)
+        $formattedBinary .= chr($loadAddress & 0xFF);
+        $formattedBinary .= chr(($loadAddress >> 8) & 0xFF);
+        // Add program data
+        $formattedBinary .= $binaryData;
+        // Add run address (2 bytes, little-endian)
+        $formattedBinary .= chr($runAddress & 0xFF);
+        $formattedBinary .= chr(($runAddress >> 8) & 0xFF);
+        
+        if (file_put_contents($formattedBinFile, $formattedBinary) === false) {
+            return ['error' => "Failed to write formatted binary file: {$formattedBinFile}"];
+        }
+        
+        // Use -as flag to add file as BIN type (uppercase, as per tutorial Makefile)
+        // Note: AppleCommander -as syntax: -as <disk> <filename> <type> < <inputfile>
+        // The filename should NOT include .BIN extension when using -as
+        if ($appleCommanderExe) {
+            $cmd = sprintf(
+                '%s -as %s %s BIN < %s 2>&1',
+                escapeshellarg($appleCommanderExe),
+                escapeshellarg(basename($dskFile)),
+                escapeshellarg($filename), // No .BIN extension
+                escapeshellarg(basename($formattedBinFile))
+            );
+        } else {
+            $cmd = sprintf(
+                '%s -jar %s -as %s %s BIN < %s 2>&1',
+                escapeshellarg($javaExe),
+                escapeshellarg($appleCommanderJar),
+                escapeshellarg(basename($dskFile)),
+                escapeshellarg($filename), // No .BIN extension
+                escapeshellarg(basename($formattedBinFile))
+            );
+        }
+        
+        exec($cmd, $output, $returnCode);
+        $errorOutput = implode("\n", $output);
+        
         // Restore original directory
         chdir($originalDir);
         
-        if ($returnCode === 0 && file_exists($dskFile) && filesize($dskFile) > 0) {
+        // Verify the file was added by checking if disk was modified
+        if ($returnCode === 0 && file_exists($dskFile) && filesize($dskFile) === 143360) {
             // Success! AppleCommander added the file
-            // Read the modified disk
-            $diskData = file_get_contents($dskFile);
-            if ($diskData === false) {
-                return ['error' => "Failed to read created disk image: {$dskFile}"];
+            // Verify by trying to list files on the disk
+            if ($appleCommanderExe) {
+                $verifyCmd = sprintf(
+                    '%s -l %s 2>&1',
+                    escapeshellarg($appleCommanderExe),
+                    escapeshellarg($dskFile)
+                );
+            } else {
+                $verifyCmd = sprintf(
+                    '%s -jar %s -l %s 2>&1',
+                    escapeshellarg($javaExe),
+                    escapeshellarg($appleCommanderJar),
+                    escapeshellarg($dskFile)
+                );
             }
+            exec($verifyCmd, $verifyOutput, $verifyReturnCode);
+            $verifyOutputStr = implode("\n", $verifyOutput);
             
-            // Cleanup
-            @unlink($binFile);
-            @unlink($dskFile);
-            @rmdir($sessionDir);
+            // Check if our filename appears in the catalog (must be exact match, not just return code)
+            $filenameUpper = strtoupper($filename);
+            $foundInCatalog = stripos($verifyOutputStr, $filenameUpper) !== false;
             
-            return [
-                'disk' => base64_encode($diskData),
-                'filename' => "{$filename}.dsk"
-            ];
+            if ($foundInCatalog && $verifyReturnCode === 0) {
+                // Binary file successfully added, now add auto-executing STARTUP.BAS
+                // This matches the working shell script approach
+                // Make sure we're still in the session directory
+                if (!chdir($sessionDir)) {
+                    chdir($originalDir);
+                    return ['error' => "Failed to change to session directory for STARTUP.BAS: {$sessionDir}"];
+                }
+                
+                $startupBasFile = __DIR__ . '/STARTUP.BAS';
+                if (file_exists($startupBasFile)) {
+                    // Use the provided STARTUP.BAS file
+                    $startupBasContent = file_get_contents($startupBasFile);
+                } else {
+                    // Create STARTUP.BAS that auto-executes the binary
+                    // Format: 10 PRINT CHR$(4);"BRUN <filename>"
+                    $startupBasContent = "10 PRINT CHR$(4);\"BRUN " . strtoupper($filename) . "\"\n";
+                }
+                
+                // Write STARTUP.BAS to temp file
+                $startupBasTemp = "{$sessionDir}/STARTUP.BAS";
+                if (file_put_contents($startupBasTemp, $startupBasContent) === false) {
+                    chdir($originalDir);
+                    return ['error' => "Failed to write STARTUP.BAS file: {$startupBasTemp}"];
+                }
+                
+                // Delete HELLO if it exists (as per shell script)
+                if ($appleCommanderExe) {
+                    $deleteHelloCmd = sprintf(
+                        '%s -d %s HELLO 2>&1',
+                        escapeshellarg($appleCommanderExe),
+                        escapeshellarg(basename($dskFile))
+                    );
+                } else {
+                    $deleteHelloCmd = sprintf(
+                        '%s -jar %s -d %s HELLO 2>&1',
+                        escapeshellarg($javaExe),
+                        escapeshellarg($appleCommanderJar),
+                        escapeshellarg(basename($dskFile))
+                    );
+                }
+                exec($deleteHelloCmd, $deleteHelloOutput, $deleteHelloReturnCode);
+                // Ignore errors - HELLO might not exist
+                
+                // Add STARTUP.BAS as HELLO (auto-executing BASIC file)
+                if ($appleCommanderExe) {
+                    $addStartupCmd = sprintf(
+                        '%s -bas %s HELLO < %s 2>&1',
+                        escapeshellarg($appleCommanderExe),
+                        escapeshellarg(basename($dskFile)),
+                        escapeshellarg(basename($startupBasTemp))
+                    );
+                } else {
+                    $addStartupCmd = sprintf(
+                        '%s -jar %s -bas %s HELLO < %s 2>&1',
+                        escapeshellarg($javaExe),
+                        escapeshellarg($appleCommanderJar),
+                        escapeshellarg(basename($dskFile)),
+                        escapeshellarg(basename($startupBasTemp))
+                    );
+                }
+                exec($addStartupCmd, $addStartupOutput, $addStartupReturnCode);
+                $addStartupOutputStr = implode("\n", $addStartupOutput);
+                
+                if ($addStartupReturnCode !== 0) {
+                    error_log("AppleCommander: Failed to add STARTUP.BAS. Output: {$addStartupOutputStr}");
+                    // Continue anyway - the binary is already on the disk
+                }
+                
+                // Restore original directory before reading disk
+                chdir($originalDir);
+                
+                // File appears to be on disk
+                $diskData = file_get_contents($dskFile);
+                if ($diskData === false) {
+                    return ['error' => "Failed to read created disk image: {$dskFile}"];
+                }
+                
+                // Cleanup
+                @unlink($binFile);
+                @unlink($formattedBinFile);
+                @unlink($startupBasTemp);
+                @unlink($dskFile);
+                @rmdir($sessionDir);
+                
+                return [
+                    'disk' => base64_encode($diskData),
+                    'filename' => "{$filename}.dsk",
+                    'debug' => "AppleCommander added file successfully. Catalog listing:\n{$verifyOutputStr}\nSTARTUP.BAS added: " . ($addStartupReturnCode === 0 ? "Yes" : "No ({$addStartupOutputStr})")
+                ];
+            } else {
+                // File not found in catalog, log error and try manual method
+                error_log("AppleCommander: File '{$filenameUpper}' not found in disk catalog. Return code: {$verifyReturnCode}, Output: {$verifyOutputStr}");
+                return createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $sessionDir, $dosMasterDisk);
+            }
         } else {
             // AppleCommander failed, try manual method
-            error_log("AppleCommander error (exit code {$returnCode}): {$errorOutput}");
+            error_log("AppleCommander error (exit code {$returnCode}, disk size: " . (file_exists($dskFile) ? filesize($dskFile) : 'missing') . "): {$errorOutput}");
             return createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $sessionDir, $dosMasterDisk);
         }
     } else {
@@ -417,29 +755,47 @@ function createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $
     // If using DOS master, read existing catalog to preserve DOS files
     // Otherwise create new catalog
     $existingFileCount = 0;
+    $fileEntrySize = 35;
+    $fileEntryOffset = $catalogOffset + 0x0B; // Start of file entries
+    
     if ($dosMasterDisk !== null) {
         // Read existing file count from catalog
         $existingFileCount = ord($disk[$catalogOffset + 0x03]);
-        // Find first available file entry slot (each entry is 35 bytes, starts at 0x0B)
-        // DOS master typically has files, so we need to find an empty slot
-        $fileEntrySize = 35;
-        $maxFilesPerSector = floor(($BYTES_PER_SECTOR - 0x0B) / $fileEntrySize);
-        // For now, we'll add to the end - but this might overwrite existing files
-        // Better approach: use AppleCommander if available
+        
+        // Find first empty file entry slot (look for entries with track=0 or deleted entries)
+        // Each entry is 35 bytes: 30 bytes filename + 1 byte track + 1 byte sector + 1 byte type + 2 bytes length
+        $foundEmptySlot = false;
+        for ($i = 0; $i < $existingFileCount; $i++) {
+            $entryOffset = $catalogOffset + 0x0B + ($i * $fileEntrySize);
+            $entryTrack = ord($disk[$entryOffset + 0x1E]);
+            // If track is 0, this is a deleted/empty entry
+            if ($entryTrack === 0) {
+                $fileEntryOffset = $entryOffset;
+                $foundEmptySlot = true;
+                break;
+            }
+        }
+        
+        // If no empty slot found, add after existing files
+        if (!$foundEmptySlot) {
+            $fileEntryOffset = $catalogOffset + 0x0B + ($existingFileCount * $fileEntrySize);
+            // Update file count only if we're adding a new entry (not reusing an empty slot)
+            $write($disk, $catalogOffset + 0x03, $existingFileCount + 1);
+        } else {
+            // Reusing an empty slot, but we should still increment the count if it was deleted
+            // Actually, if we found an empty slot, the count might already include it, so don't change it
+            // But make sure the entry is properly written
+        }
+    } else {
+        // New disk, create catalog entry
+        $write($disk, $catalogOffset + 0x00, 0x11); // Next catalog track
+        $write($disk, $catalogOffset + 0x01, 0x0E); // Next catalog sector
+        $write($disk, $catalogOffset + 0x03, 1); // Number of files
     }
-    
-    $write($disk, $catalogOffset + 0x00, 0x11); // Next catalog track
-    $write($disk, $catalogOffset + 0x01, 0x0E); // Next catalog sector
-    $write($disk, $catalogOffset + 0x03, $existingFileCount + 1); // Number of files (increment if DOS master)
-    
-    // File entry (starts at offset 0x0B, but if DOS master has files, find next slot)
-    // Each file entry is 35 bytes: 30 bytes filename + 1 byte track + 1 byte sector + 1 byte type + 2 bytes length
-    $fileEntrySize = 35;
-    $fileEntryOffset = $catalogOffset + 0x0B + ($existingFileCount * $fileEntrySize);
     
     // Make sure we don't overflow the sector
     if ($fileEntryOffset + $fileEntrySize > $catalogOffset + $BYTES_PER_SECTOR) {
-        return ['error' => "Catalog sector full - cannot add more files"];
+        return ['error' => "Catalog sector full - cannot add more files. Try using AppleCommander instead."];
     }
     
     $filenamePadded = str_pad(substr($filename, 0, 30), 30, ' ', STR_PAD_RIGHT);
@@ -471,16 +827,43 @@ function createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $
     $write($disk, $runAddressOffset + 0, $runAddress & 0xFF);
     $write($disk, $runAddressOffset + 1, ($runAddress >> 8) & 0xFF);
     
+    // Save disk to file for verification
+    $dskFile = "{$sessionDir}/{$filename}.dsk";
+    if (file_put_contents($dskFile, $disk) === false) {
+        return ['error' => "Failed to write disk image: {$dskFile}"];
+    }
+    
+    // Verify disk size
+    if (strlen($disk) !== $DISK_SIZE) {
+        return ['error' => "Invalid disk size: expected {$DISK_SIZE}, got " . strlen($disk)];
+    }
+    
     // If we used DOS master as base, the disk is bootable
     // Otherwise, it's just a data disk
     $note = ($dosMasterDisk !== null) 
         ? 'Disk created from DOS master (bootable with DOS 3.3)' 
         : 'Disk created manually (AppleCommander not available). Boot DOS 3.3 first, then load this disk.';
     
+    // Read disk data
+    $diskData = file_get_contents($dskFile);
+    if ($diskData === false) {
+        return ['error' => "Failed to read created disk image: {$dskFile}"];
+    }
+    
+    // Cleanup temporary files
+    $binFile = "{$sessionDir}/{$filename}.BIN";
+    @unlink($binFile);
+    @unlink($dskFile);
+    @rmdir($sessionDir);
+    
     return [
-        'disk' => base64_encode($disk),
+        'disk' => base64_encode($diskData),
         'filename' => "{$filename}.dsk",
-        'note' => $note
+        'note' => $note,
+        'method' => 'manual',
+        'debug' => "Manual disk creation. File entry at offset " . ($fileEntryOffset - $catalogOffset) . 
+                   ", Start track: {$startTrack}, Start sector: {$startSector}, " .
+                   "Program sectors: {$programSectors}, Existing files: {$existingFileCount}"
     ];
 }
 ?>
