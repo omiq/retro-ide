@@ -2499,6 +2499,13 @@ function exposeToGlobal() {
       console.log('✅ Apple2 API available!');
       console.log('💡 Try: api.type(\'PRINT "HELLO"\\r\') or api.reset()');
       console.log('💡 Or: const apple2 = api.apple2; apple2.reset();');
+      console.log('💡 Load disk:');
+      console.log('   // Option 1: Use stored disk (after loading a program)');
+      console.log('   const blobUrl = api.createDiskBlobUrl();');
+      console.log('   // Option 2: Provide disk data');
+      console.log('   const diskData = await api.getCurrentDiskData();');
+      console.log('   const blobUrl = api.createDiskBlobUrl(diskData);');
+      console.log('   // Note: loadAjax may not work (requires UI elements). Use setBinary or direct manipulation instead.');
       
       // Test if emulator is accessible
       try {
@@ -2642,7 +2649,9 @@ function exposeToGlobal() {
   if (platform_id === 'apple2e') {
     console.log("Use window.IDE.getApple2API() to access Apple2 emulator API");
     console.log("Example: const api = window.IDE.getApple2API(); api.type('PRINT \"HELLO\"\\r');");
+    console.log("Access Apple2 object: const api = window.IDE.getApple2API(); api.Apple2.doLoadHTTP(1, url);");
     console.log("Break program: window.IDE.breakApple2() or api.break()");
+    console.log("Load binary via URL: const api = window.IDE.getApple2API(); api.defaultLoadHttp(blobUrl);");
   }
 }
 

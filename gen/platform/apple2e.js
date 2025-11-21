@@ -200,6 +200,7 @@ class Apple2EPlatform {
         try {
             // Access the iframe's window object
             const iframeWindow = this.iframe.contentWindow;
+            const platform = this; // Capture platform reference for closures
             if (!iframeWindow.apple2 && !iframeWindow.APPLE2_API) {
                 console.warn('Apple2EPlatform: apple2 API not available in iframe yet');
                 return null;
@@ -210,6 +211,11 @@ class Apple2EPlatform {
                 get apple2() {
                     var _a;
                     return iframeWindow.apple2 || ((_a = iframeWindow.APPLE2_API) === null || _a === void 0 ? void 0 : _a.apple2);
+                },
+                // Direct access to Apple2 namespace object
+                get Apple2() {
+                    var _a;
+                    return iframeWindow.Apple2 || ((_a = iframeWindow.APPLE2_API) === null || _a === void 0 ? void 0 : _a.Apple2);
                 },
                 // Convenience methods
                 getIO: () => {
@@ -235,6 +241,135 @@ class Apple2EPlatform {
                     var _a;
                     const apple2 = iframeWindow.apple2 || ((_a = iframeWindow.APPLE2_API) === null || _a === void 0 ? void 0 : _a.apple2);
                     return apple2 ? apple2.getCPU() : null;
+                },
+                loadAjax: (drive, url) => {
+                    const api = iframeWindow.APPLE2_API;
+                    if (api && api.loadAjax) {
+                        return api.loadAjax(drive, url);
+                    }
+                    else if (iframeWindow.loadAjax) {
+                        return iframeWindow.loadAjax(drive, url);
+                    }
+                    else if (iframeWindow.Apple2 && typeof iframeWindow.Apple2.loadAjax === 'function') {
+                        return iframeWindow.Apple2.loadAjax(drive, url);
+                    }
+                    else {
+                        console.error('Apple2EPlatform: loadAjax not available');
+                        throw new Error('loadAjax not available');
+                    }
+                },
+                defaultLoadHttp: (url) => {
+                    const api = iframeWindow.APPLE2_API;
+                    if (api && api.defaultLoadHttp) {
+                        return api.defaultLoadHttp(url);
+                    }
+                    else if (iframeWindow.Apple2 && typeof iframeWindow.Apple2.defaultLoadHttp === 'function') {
+                        return iframeWindow.Apple2.defaultLoadHttp(url);
+                    }
+                    else if (typeof iframeWindow.defaultLoadHttp === 'function') {
+                        return iframeWindow.defaultLoadHttp(url);
+                    }
+                    else {
+                        console.error('Apple2EPlatform: defaultLoadHttp not available');
+                        throw new Error('defaultLoadHttp not available');
+                    }
+                },
+                // Helper to create a blob URL from disk data
+                createDiskBlobUrl: (diskData) => {
+                    // If no data provided, try to get it from the stored blob
+                    if (!diskData && platform.currentDiskBlob) {
+                        const blob = platform.currentDiskBlob;
+                        const blobUrl = URL.createObjectURL(blob);
+                        console.log(`Created blob URL from stored disk: ${blobUrl} (${blob.size} bytes)`);
+                        return blobUrl;
+                    }
+                    if (!diskData) {
+                        throw new Error('No disk data provided and no stored disk blob available. Provide diskData or load a program first.');
+                    }
+                    let data;
+                    if (diskData instanceof Uint8Array) {
+                        data = diskData;
+                    }
+                    else if (diskData instanceof ArrayBuffer) {
+                        data = new Uint8Array(diskData);
+                    }
+                    else if (Array.isArray(diskData)) {
+                        data = new Uint8Array(diskData);
+                    }
+                    else {
+                        throw new Error('Invalid disk data type. Expected Uint8Array, ArrayBuffer, or number[]');
+                    }
+                    // Create a File object with .dsk extension so doLoadHTTP can recognize it
+                    const file = new File([data], 'disk.dsk', { type: 'application/octet-stream' });
+                    const blobUrl = URL.createObjectURL(file);
+                    console.log(`Created blob URL from File: ${blobUrl} (${data.length} bytes, filename: ${file.name})`);
+                    return blobUrl;
+                },
+                // Get the current disk data as Uint8Array (from stored blob)
+                getCurrentDiskData: async () => {
+                    var _a;
+                    // First, try to get from stored blob
+                    if (platform.currentDiskBlob) {
+                        const blob = platform.currentDiskBlob;
+                        const arrayBuffer = await blob.arrayBuffer();
+                        return new Uint8Array(arrayBuffer);
+                    }
+                    // If no stored blob, try to get from iframe's drive state
+                    try {
+                        const apple2 = iframeWindow.apple2 || ((_a = iframeWindow.APPLE2_API) === null || _a === void 0 ? void 0 : _a.apple2);
+                        if (apple2) {
+                            const io = apple2.getIO();
+                            if (io) {
+                                const disk2 = io.getSlot(6); // Slot 6 is Disk2
+                                if (disk2 && disk2.drives && disk2.drives[1]) {
+                                    const drive = disk2.drives[1];
+                                    const disk = drive.disk;
+                                    // Check if a disk is actually present (has encoding)
+                                    if (disk && disk.encoding && disk.encoding !== 'empty') {
+                                        // Try to get data as ArrayBuffer or Uint8Array
+                                        let data = null;
+                                        // Check disk.data first
+                                        if (disk.data instanceof ArrayBuffer) {
+                                            data = new Uint8Array(disk.data);
+                                        }
+                                        else if (disk.data instanceof Uint8Array) {
+                                            data = disk.data;
+                                        }
+                                        else if (disk._rawData instanceof ArrayBuffer) {
+                                            data = new Uint8Array(disk._rawData);
+                                        }
+                                        else if (disk._rawData instanceof Uint8Array) {
+                                            data = disk._rawData;
+                                        }
+                                        else if (disk._rawData && typeof disk._rawData === 'object') {
+                                            // If _rawData is an object with numeric keys, convert it
+                                            const keys = Object.keys(disk._rawData).map(k => parseInt(k)).filter(k => !isNaN(k));
+                                            if (keys.length > 0) {
+                                                const maxKey = Math.max(...keys);
+                                                data = new Uint8Array(maxKey + 1);
+                                                for (const key of keys) {
+                                                    data[key] = disk._rawData[key];
+                                                }
+                                            }
+                                        }
+                                        if (data && data.length > 0) {
+                                            console.log(`Apple2EPlatform: Retrieved disk data from iframe drive (${data.length} bytes, encoding: ${disk.encoding})`);
+                                            return data;
+                                        }
+                                        else {
+                                            console.warn(`Apple2EPlatform: Disk found in drive (encoding: ${disk.encoding}) but no readable data available`);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (error) {
+                        console.warn('Apple2EPlatform: Could not get disk data from iframe:', error);
+                    }
+                    // Provide helpful error message
+                    console.warn('No disk blob stored and no disk found in iframe drive. Load a program (BASIC or compiled) to create a disk, or manually load a disk image.');
+                    return null;
                 },
                 setAcceleration: (enabled) => {
                     const api = iframeWindow.APPLE2_API;
@@ -468,7 +603,9 @@ class Apple2EPlatform {
         // Compiled binaries are typically > 100 bytes and don't decode to valid ASCII BASIC
         const isBinary = this.isCompiledBinary(rom);
         if (isBinary) {
-            console.log('Apple2EPlatform: Detected compiled binary, creating disk image');
+            console.log('Apple2EPlatform: Detected compiled binary, creating bootable disk image');
+            // For compiled binaries, create a bootable disk image and load via doLoadHTTP
+            // This ensures the program loads reliably and can be reloaded when code changes
             this.loadCompiledProgram(title, rom).catch(err => {
                 console.error('Apple2EPlatform: Error loading compiled program:', err);
             });
@@ -736,13 +873,34 @@ class Apple2EPlatform {
             this.currentDiskBlob = new Blob([diskBuffer], { type: 'application/octet-stream' });
             console.log(`Apple2EPlatform: Disk blob stored for download: ${this.currentDiskBlob.size} bytes`);
             console.log(`Apple2EPlatform: currentDiskBlob is now:`, this.currentDiskBlob ? 'set' : 'null');
-            // Send disk to iframe - it contains the BASIC program
+            // Get a URL from serve_disk.php so doLoadHTTP can use it (needs .dsk extension)
+            console.log(`Apple2EPlatform: Getting server URL for disk with .dsk extension...`);
+            const serveResponse = await fetch(`${API_BASE_URL}/api/apple2/serve_disk.php`, {
+                method: 'POST',
+                mode: 'cors',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    disk: result.disk, // Already base64 encoded
+                    filename: result.filename
+                })
+            });
+            if (!serveResponse.ok) {
+                throw new Error(`Failed to get disk URL: ${serveResponse.status} ${serveResponse.statusText}`);
+            }
+            const serveResult = await serveResponse.json();
+            if (serveResult.error) {
+                throw new Error(serveResult.error);
+            }
+            console.log(`Apple2EPlatform: Got disk URL: ${serveResult.url}`);
+            // Send URL to iframe - doLoadHTTP will load it (needs .dsk extension in URL)
             this.iframe.contentWindow.postMessage({
-                type: 'load_disk',
+                type: 'load_disk_url',
                 data: {
                     drive: 1,
-                    filename: result.filename,
-                    diskData: Array.from(diskData)
+                    url: serveResult.url,
+                    filename: result.filename
                 }
             }, '*');
             // Clear loading flag after a delay
@@ -760,6 +918,23 @@ class Apple2EPlatform {
             // Don't throw - just log the error so the UI doesn't break
             // The user can still try to download manually if needed
         }
+    }
+    loadBinaryDirectly(title, programData) {
+        // Use loadROM to load binary directly into RAM (as recommended by apple2js developer)
+        // This avoids the complexity of creating disk images for compiled binaries
+        if (!this.iframe || !this.iframe.contentWindow) {
+            console.error('Apple2EPlatform: Iframe not available for binary load');
+            return;
+        }
+        console.log(`Apple2EPlatform: Loading binary directly into RAM: ${title}, ${programData.length} bytes`);
+        // Send the binary data to the iframe to load via loadROM
+        this.iframe.contentWindow.postMessage({
+            type: 'load_rom',
+            data: {
+                title: title,
+                romData: Array.from(programData)
+            }
+        }, '*');
     }
     async loadCompiledProgram(title, programData) {
         if (!this.iframe || !this.iframe.contentWindow) {
@@ -809,16 +984,34 @@ class Apple2EPlatform {
             new Uint8Array(diskBuffer).set(diskData);
             this.currentDiskBlob = new Blob([diskBuffer], { type: 'application/octet-stream' });
             console.log(`Apple2EPlatform: Disk blob stored for download: ${this.currentDiskBlob.size} bytes`);
-            // Send disk to iframe - it's bootable and will auto-execute STARTUP.BAS (HELLO)
-            // STARTUP.BAS contains: 10 PRINT CHR$(4);"BRUN PROG"
-            // So we don't need to type anything - just boot and let it auto-execute
+            // Get a URL from serve_disk.php so doLoadHTTP can use it (needs .dsk extension)
+            console.log(`Apple2EPlatform: Getting server URL for disk with .dsk extension...`);
+            const serveResponse = await fetch(`${API_BASE_URL}/api/apple2/serve_disk.php`, {
+                method: 'POST',
+                mode: 'cors',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    disk: result.disk, // Already base64 encoded
+                    filename: result.filename
+                })
+            });
+            if (!serveResponse.ok) {
+                throw new Error(`Failed to get disk URL: ${serveResponse.status} ${serveResponse.statusText}`);
+            }
+            const serveResult = await serveResponse.json();
+            if (serveResult.error) {
+                throw new Error(serveResult.error);
+            }
+            console.log(`Apple2EPlatform: Got disk URL: ${serveResult.url}`);
+            // Send URL to iframe - doLoadHTTP will load it (needs .dsk extension in URL)
             this.iframe.contentWindow.postMessage({
-                type: 'load_disk',
+                type: 'load_disk_url',
                 data: {
-                    drive: 1, // Load bootable disk into drive 1 (it contains DOS + program + auto-executing BASIC)
-                    filename: result.filename,
-                    diskData: Array.from(diskData)
-                    // No runCommand - the disk auto-executes on boot
+                    drive: 1,
+                    url: serveResult.url,
+                    filename: result.filename
                 }
             }, '*');
             // Clear loading flag after a delay
