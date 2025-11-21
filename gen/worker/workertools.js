@@ -101,6 +101,10 @@ exports.TOOLS = {
 exports.TOOL_PRELOADFS = {
     'cc65-apple2': '65-apple2',
     'ca65-apple2': '65-apple2',
+    'cc65-apple2e': '65-apple2', // apple2e uses same filesystem as apple2
+    'ca65-apple2e': '65-apple2', // apple2e uses same filesystem as apple2
+    'ld65-apple2e': '65-apple2', // apple2e uses same filesystem as apple2
+    '65-apple2e': '65-apple2', // Direct mapping for fallback
     'cc65-c64': '65-c64',
     'ca65-c64': '65-c64',
     'cc65-vic20': '65-vic20',

@@ -220,6 +220,13 @@ exports.PLATFORM_PARAMS = {
         libargs: ['apple2.lib'],
         acmeargs: ['-f', 'apple'],
     },
+    'apple2e': {
+        arch: '6502',
+        define: ['__APPLE2__'],
+        cfgfile: 'apple2.cfg',
+        libargs: ['apple2.lib'],
+        acmeargs: ['-f', 'apple'],
+    },
     'atari8-800xl.disk': {
         arch: '6502',
         define: ['__ATARI__'],

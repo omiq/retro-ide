@@ -15,6 +15,7 @@ class Apple2EPlatform {
         this.emulatorReady = false;
         this.lastLoadedProgram = null;
         this.isLoadingProgram = false;
+        this.currentDiskBlob = null; // Store the disk image for download
         this.mainElement = mainElement;
         // Listen for messages from iframe
         window.addEventListener('message', (event) => {
@@ -52,7 +53,7 @@ class Apple2EPlatform {
         this.iframe.style.border = '1px solid #ccc';
         this.iframe.style.backgroundColor = '#000';
         this.iframe.setAttribute('tabindex', '0'); // Make iframe focusable
-        this.iframe.setAttribute('allow', 'pointer-events'); // Allow pointer events
+        // Note: 'pointer-events' is not a valid iframe allow attribute, but we handle events in the iframe itself
         // Don't add any event listeners to the iframe from parent
         // The iframe should handle all its own events
         // Cross-origin restrictions might prevent access anyway
@@ -70,6 +71,9 @@ class Apple2EPlatform {
         // Add iframe to the main element
         this.mainElement.innerHTML = '';
         this.mainElement.appendChild(this.iframe);
+        // Load iframe with cache busting
+        const cacheBuster = `?t=${Date.now()}`;
+        this.iframe.src = `apple2e-iframe.html${cacheBuster}`;
         // CRITICAL: Don't intercept clicks on the iframe at all
         // Remove any event listeners that might block clicks
         // The iframe needs to handle its own clicks completely
@@ -112,10 +116,12 @@ class Apple2EPlatform {
         return this.emulatorReady;
     }
     getToolForFilename(filename) {
-        // For now, only support BASIC
         const lowerFilename = filename.toLowerCase();
         if (lowerFilename.endsWith('.bas')) {
             return 'applesoftbasic'; // Use AppleSoft BASIC compiler
+        }
+        if (lowerFilename.endsWith('.c') || lowerFilename.endsWith('.h')) {
+            return 'cc65'; // Use cc65 for C programs
         }
         return 'applesoftbasic'; // Default to BASIC
     }
@@ -124,6 +130,18 @@ class Apple2EPlatform {
     }
     getPresets() {
         return APPLE2E_PRESETS;
+    }
+    getDownloadFile() {
+        // Return the disk image if available
+        console.log(`Apple2EPlatform: getDownloadFile() called, currentDiskBlob:`, this.currentDiskBlob ? `${this.currentDiskBlob.size} bytes` : 'null');
+        if (this.currentDiskBlob) {
+            return {
+                extension: '.dsk',
+                blob: this.currentDiskBlob
+            };
+        }
+        console.log('Apple2EPlatform: No disk blob available for download');
+        return undefined;
     }
     pause() {
         console.log('Apple2EPlatform pause() called');
@@ -421,69 +439,345 @@ class Apple2EPlatform {
     }
     loadROM(title, rom) {
         console.log('Apple2EPlatform loadROM() called', { title, romLength: rom === null || rom === void 0 ? void 0 : rom.length });
-        // For BASIC programs, we'll send them as text to be typed into the emulator
         if (!rom || rom.length === 0) {
             console.warn('Apple2EPlatform: No ROM data provided');
             return;
         }
-        // Prevent duplicate loads - check if this is the same program or if one is already loading
-        const programText = new TextDecoder().decode(rom);
-        const programHash = programText.substring(0, 50);
-        if (this.isLoadingProgram) {
-            console.warn('Apple2EPlatform: Already loading a program, ignoring duplicate request');
-            return;
+        // Detect if this is a compiled binary (C program) or BASIC text
+        // Compiled binaries are typically > 100 bytes and don't decode to valid ASCII BASIC
+        const isBinary = this.isCompiledBinary(rom);
+        if (isBinary) {
+            console.log('Apple2EPlatform: Detected compiled binary, creating disk image');
+            this.loadCompiledProgram(title, rom);
         }
-        if (this.lastLoadedProgram === programHash) {
-            console.warn('Apple2EPlatform: Same program already loaded, ignoring duplicate request');
-            return;
-        }
-        // Mark as loading and remember this program
-        this.isLoadingProgram = true;
-        this.lastLoadedProgram = programHash;
-        if (this.iframe && this.iframe.contentWindow) {
-            // Always wait for emulator to be ready, even if emulatorReady flag is set
-            // This prevents race conditions when switching files quickly
-            const sendWhenReady = () => {
-                if (!this.iframe || !this.iframe.contentWindow) {
-                    console.error('Apple2EPlatform: iframe lost during wait');
-                    return;
-                }
-                // Double-check emulator is actually ready by checking the iframe
-                const iframeWindow = this.iframe.contentWindow;
-                if (!iframeWindow.apple2 && !this.emulatorReady) {
+        else {
+            console.log('Apple2EPlatform: Detected BASIC program, sending as text');
+            // For BASIC programs, we'll send them as text to be typed into the emulator
+            const programText = new TextDecoder().decode(rom);
+            const programHash = programText.substring(0, 50);
+            if (this.isLoadingProgram) {
+                console.warn('Apple2EPlatform: Already loading a program, ignoring duplicate request');
+                return;
+            }
+            if (this.lastLoadedProgram === programHash) {
+                console.warn('Apple2EPlatform: Same program already loaded, ignoring duplicate request');
+                return;
+            }
+            // Mark as loading and remember this program
+            this.isLoadingProgram = true;
+            this.lastLoadedProgram = programHash;
+            if (this.iframe && this.iframe.contentWindow) {
+                // Always wait for emulator to be ready, even if emulatorReady flag is set
+                // This prevents race conditions when switching files quickly
+                const sendWhenReady = () => {
+                    if (!this.iframe || !this.iframe.contentWindow) {
+                        console.error('Apple2EPlatform: iframe lost during wait');
+                        return;
+                    }
+                    // Double-check emulator is actually ready by checking the iframe
+                    const iframeWindow = this.iframe.contentWindow;
+                    if (!iframeWindow.apple2 && !this.emulatorReady) {
+                        console.log('Apple2EPlatform: Emulator not ready yet, waiting...');
+                        setTimeout(sendWhenReady, 100);
+                        return;
+                    }
+                    // Emulator is ready, send the program
+                    console.log('Apple2EPlatform: Emulator ready, sending program');
+                    this.sendROMToEmulator(rom);
+                };
+                if (!this.emulatorReady) {
                     console.log('Apple2EPlatform: Emulator not ready yet, waiting...');
-                    setTimeout(sendWhenReady, 100);
-                    return;
-                }
-                // Emulator is ready, send the program
-                console.log('Apple2EPlatform: Emulator ready, sending program');
-                this.sendROMToEmulator(rom);
-            };
-            if (!this.emulatorReady) {
-                console.log('Apple2EPlatform: Emulator not ready yet, waiting...');
-                // Wait for emulator to be ready
-                const checkReady = setInterval(() => {
-                    if (this.emulatorReady && this.iframe && this.iframe.contentWindow) {
+                    // Wait for emulator to be ready
+                    const checkReady = setInterval(() => {
+                        if (this.emulatorReady && this.iframe && this.iframe.contentWindow) {
+                            clearInterval(checkReady);
+                            sendWhenReady();
+                        }
+                    }, 100);
+                    // Timeout after 10 seconds
+                    setTimeout(() => {
                         clearInterval(checkReady);
-                        sendWhenReady();
-                    }
-                }, 100);
-                // Timeout after 10 seconds
-                setTimeout(() => {
-                    clearInterval(checkReady);
-                    if (this.emulatorReady) {
-                        sendWhenReady();
-                    }
-                    else {
-                        console.error('Apple2EPlatform: Timeout waiting for emulator to be ready');
-                    }
-                }, 10000);
+                        if (this.emulatorReady) {
+                            sendWhenReady();
+                        }
+                        else {
+                            console.error('Apple2EPlatform: Timeout waiting for emulator to be ready');
+                        }
+                    }, 10000);
+                }
+                else {
+                    // Even if flag says ready, verify and wait a bit to ensure stability
+                    console.log('Apple2EPlatform: Emulator ready flag set, verifying...');
+                    setTimeout(sendWhenReady, 100);
+                }
             }
-            else {
-                // Even if flag says ready, verify and wait a bit to ensure stability
-                console.log('Apple2EPlatform: Emulator ready flag set, verifying...');
-                setTimeout(sendWhenReady, 100);
+        }
+    }
+    isCompiledBinary(data) {
+        // Check if data is likely a compiled binary:
+        // 1. Size > 100 bytes (BASIC programs are usually smaller when encoded)
+        // 2. Contains null bytes or non-printable characters
+        // 3. Doesn't start with line numbers (BASIC programs start with "10 ", "20 ", etc.)
+        if (data.length < 100) {
+            // Small files are likely BASIC
+            return false;
+        }
+        // Try to decode as text
+        let text;
+        try {
+            text = new TextDecoder('utf-8', { fatal: false }).decode(data);
+        }
+        catch (e) {
+            // If decoding fails, it's likely binary
+            return true;
+        }
+        // Check if it looks like BASIC (starts with line numbers)
+        const trimmed = text.trim();
+        if (/^\d+\s/.test(trimmed)) {
+            // Starts with a line number, likely BASIC
+            return false;
+        }
+        // Check for high percentage of non-printable characters
+        let nonPrintable = 0;
+        for (let i = 0; i < Math.min(data.length, 1000); i++) {
+            if (data[i] < 0x20 && data[i] !== 0x0A && data[i] !== 0x0D && data[i] !== 0x09) {
+                nonPrintable++;
             }
+        }
+        // If more than 10% are non-printable (excluding common whitespace), it's likely binary
+        return nonPrintable > (Math.min(data.length, 1000) * 0.1);
+    }
+    createAppleIIDiskImage(programData, filename, loadAddress, runAddress) {
+        // Apple II DOS 3.3 disk format:
+        // - 35 tracks
+        // - 16 sectors per track
+        // - 256 bytes per sector
+        // - Total: 35 * 16 * 256 = 143,360 bytes
+        const TRACKS = 35;
+        const SECTORS_PER_TRACK = 16;
+        const BYTES_PER_SECTOR = 256;
+        const DISK_SIZE = TRACKS * SECTORS_PER_TRACK * BYTES_PER_SECTOR;
+        const disk = new Uint8Array(DISK_SIZE);
+        disk.fill(0);
+        // Helper to write data at a specific address
+        const write = (address, data, length) => {
+            if (typeof data === 'string') {
+                for (let i = 0; i < data.length && (address + i) < disk.length; i++) {
+                    disk[address + i] = data.charCodeAt(i) & 0xff;
+                }
+            }
+            else if (typeof data === 'number') {
+                const len = length || 1;
+                for (let b = 0; b < len && (address + b) < disk.length; b++) {
+                    disk[address + b] = (data >> (b * 8)) & 0xff;
+                }
+            }
+            else if (data instanceof Uint8Array) {
+                for (let i = 0; i < data.length && (address + i) < disk.length; i++) {
+                    disk[address + i] = data[i];
+                }
+            }
+        };
+        // Track 0, Sector 0: Volume Table of Contents (VTOC)
+        // Byte 0x00: Unused
+        // Byte 0x01: Track of first catalog sector (usually 0x11 = track 17)
+        // Byte 0x02: Sector of first catalog sector (usually 0x0F = sector 15)
+        // Byte 0x03: DOS version (0x03 = DOS 3.3)
+        // Byte 0x04-0x26: Volume bitmap (tracks 0-34, each bit = 1 sector)
+        // Byte 0x27: Number of tracks per disk (0x23 = 35)
+        // Byte 0x28-0x2F: Unused
+        // Byte 0x30-0x33: Maximum number of tracks (0x23 = 35)
+        // Byte 0x34-0x35: Last allocated track/sector
+        // Byte 0x36-0x3F: Unused
+        write(0x0000, 0x00); // Unused
+        write(0x0001, 0x11); // First catalog track (17)
+        write(0x0002, 0x0F); // First catalog sector (15)
+        write(0x0003, 0x03); // DOS version 3.3
+        write(0x0027, 0x23); // 35 tracks
+        write(0x0030, 0x23); // Max tracks
+        write(0x0031, 0x23); // Max tracks (high byte)
+        // Mark sectors as used in bitmap (tracks 0-2 are used for DOS)
+        // Track 0: sectors 0-15 used
+        for (let i = 0; i < 16; i++) {
+            const byteIndex = 0x04 + Math.floor(i / 8);
+            const bitIndex = i % 8;
+            disk[byteIndex] |= (1 << (7 - bitIndex));
+        }
+        // Track 1: sectors 0-15 used
+        for (let i = 0; i < 16; i++) {
+            const byteIndex = 0x06 + Math.floor(i / 8);
+            const bitIndex = i % 8;
+            disk[byteIndex] |= (1 << (7 - bitIndex));
+        }
+        // Track 2: sectors 0-15 used
+        for (let i = 0; i < 16; i++) {
+            const byteIndex = 0x08 + Math.floor(i / 8);
+            const bitIndex = i % 8;
+            disk[byteIndex] |= (1 << (7 - bitIndex));
+        }
+        // Calculate sectors needed for program
+        const programSectors = Math.ceil(programData.length / BYTES_PER_SECTOR);
+        const startTrack = 3;
+        const startSector = 0;
+        // Mark program sectors as used
+        let currentTrack = startTrack;
+        let currentSector = startSector;
+        for (let i = 0; i < programSectors; i++) {
+            const byteIndex = 0x04 + Math.floor((currentTrack * 16 + currentSector) / 8);
+            const bitIndex = (currentTrack * 16 + currentSector) % 8;
+            disk[byteIndex] |= (1 << (7 - bitIndex));
+            currentSector++;
+            if (currentSector >= 16) {
+                currentSector = 0;
+                currentTrack++;
+            }
+        }
+        // Track 17, Sector 15: Catalog sector
+        // Each file entry is 35 bytes
+        const CATALOG_TRACK = 17;
+        const CATALOG_SECTOR = 15;
+        const CATALOG_OFFSET = (CATALOG_TRACK * SECTORS_PER_TRACK + CATALOG_SECTOR) * BYTES_PER_SECTOR;
+        // Catalog header
+        write(CATALOG_OFFSET + 0x00, 0x11); // Next catalog track (17)
+        write(CATALOG_OFFSET + 0x01, 0x0E); // Next catalog sector (14)
+        write(CATALOG_OFFSET + 0x02, 0x00); // Unused
+        write(CATALOG_OFFSET + 0x03, 0x01); // Number of files (1)
+        write(CATALOG_OFFSET + 0x04, 0x00); // Unused
+        // File entry (starts at offset 0x0B)
+        // DOS 3.3 catalog entry format:
+        // Bytes 0x00-0x1D: Filename (30 chars, space-padded)
+        // Byte 0x1E: Track of first sector
+        // Byte 0x1F: Sector of first sector
+        // Byte 0x20: File type and flags (bit 7 = locked, bits 0-2 = type)
+        // Byte 0x21-0x22: Length in sectors (low, high)
+        // For binary files, we also need load/run addresses in the file itself
+        const FILE_ENTRY_OFFSET = CATALOG_OFFSET + 0x0B;
+        const filenamePadded = (filename.substring(0, 30).toUpperCase() + '                    ').substring(0, 30);
+        write(FILE_ENTRY_OFFSET + 0x00, filenamePadded.substring(0, 30)); // Filename (30 chars)
+        write(FILE_ENTRY_OFFSET + 0x1E, startTrack); // Track of first sector
+        write(FILE_ENTRY_OFFSET + 0x1F, startSector); // Sector of first sector
+        write(FILE_ENTRY_OFFSET + 0x20, 0x80); // File type: 0x80 = binary (type 0) + locked bit
+        write(FILE_ENTRY_OFFSET + 0x21, programSectors & 0xFF); // Length in sectors (low byte)
+        write(FILE_ENTRY_OFFSET + 0x22, (programSectors >> 8) & 0xFF); // Length in sectors (high byte)
+        // Write program data with DOS 3.3 binary file header
+        // Binary files on DOS 3.3 have a 2-byte header: load address (low, high)
+        // Then the program data, then a 2-byte run address (low, high) at the end
+        const programOffset = (startTrack * SECTORS_PER_TRACK + startSector) * BYTES_PER_SECTOR;
+        // Write load address (2 bytes, little-endian)
+        write(programOffset + 0, loadAddress & 0xFF);
+        write(programOffset + 1, (loadAddress >> 8) & 0xFF);
+        // Write program data
+        write(programOffset + 2, programData);
+        // Write run address at the end (2 bytes, little-endian)
+        const runAddressOffset = programOffset + 2 + programData.length;
+        write(runAddressOffset + 0, runAddress & 0xFF);
+        write(runAddressOffset + 1, (runAddress >> 8) & 0xFF);
+        console.log(`Apple2EPlatform: Created disk image: ${filename}.BIN, ${programSectors} sectors, ${programData.length} bytes, Load: $${loadAddress.toString(16)}, Run: $${runAddress.toString(16)}`);
+        return disk;
+    }
+    parseBinaryHeader(data) {
+        // Check for AppleSingle header: https://github.com/cc65/cc65/blob/master/libsrc/apple2/exehdr.s
+        // Magic: 0x00, 0x05, 0x16, 0x00
+        if (data.length >= 58 &&
+            data[0] === 0x00 && data[1] === 0x05 && data[2] === 0x16 && data[3] === 0x00) {
+            // AppleSingle format - load address is at offset 0x38-0x39 (big endian)
+            const loadAddress = (data[0x38] << 8) | data[0x39];
+            // Run address is typically the same as load address for cc65 programs
+            const runAddress = loadAddress;
+            const headerSize = 58;
+            const programData = data.slice(headerSize);
+            console.log(`Apple2EPlatform: Detected AppleSingle header - Load: $${loadAddress.toString(16)}, Size: ${programData.length} bytes`);
+            return { loadAddress, runAddress, headerSize, programData };
+        }
+        // Check for 4-byte DOS header
+        if (data.length >= 4) {
+            const origin = data[0] | (data[1] << 8);
+            const size = data[2] | (data[3] << 8);
+            const isPlausible = origin < 0xc000 &&
+                origin + size < 0x13000 &&
+                (origin === 0x803 || (origin & 0xff) === 0);
+            if (size === data.length - 4 && isPlausible) {
+                const loadAddress = origin;
+                const runAddress = origin; // Default run address same as load
+                const headerSize = 4;
+                const programData = data.slice(headerSize);
+                console.log(`Apple2EPlatform: Detected DOS header - Load: $${loadAddress.toString(16)}, Size: ${programData.length} bytes`);
+                return { loadAddress, runAddress, headerSize, programData };
+            }
+        }
+        // Default: raw binary @ $803 (standard cc65 load address)
+        const loadAddress = 0x803;
+        const runAddress = 0x803;
+        const headerSize = 0;
+        const programData = data;
+        console.log(`Apple2EPlatform: No header detected, using default - Load: $${loadAddress.toString(16)}, Size: ${programData.length} bytes`);
+        return { loadAddress, runAddress, headerSize, programData };
+    }
+    async loadCompiledProgram(title, programData) {
+        if (!this.iframe || !this.iframe.contentWindow) {
+            console.error('Apple2EPlatform: Cannot load program - iframe not available');
+            this.isLoadingProgram = false;
+            return;
+        }
+        // Parse binary header to get load address and strip header
+        const { loadAddress, runAddress, headerSize, programData: actualProgramData } = this.parseBinaryHeader(programData);
+        // Extract filename from title
+        const filename = title.replace(/\.[^.]*$/, '').toUpperCase().substring(0, 8) || 'PROGRAM';
+        console.log(`Apple2EPlatform: Creating bootable disk for ${filename} - Load: $${loadAddress.toString(16)}, Run: $${runAddress.toString(16)}, Size: ${actualProgramData.length} bytes`);
+        try {
+            // Call PHP API to create bootable disk
+            const API_BASE_URL = 'https://ide.retrogamecoders.com'; // Or from config
+            const binaryBase64 = btoa(String.fromCharCode(...actualProgramData));
+            const response = await fetch(`${API_BASE_URL}/api/apple2/create_disk.php`, {
+                method: 'POST',
+                mode: 'cors',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    binary: binaryBase64,
+                    filename: filename,
+                    loadAddress: loadAddress,
+                    runAddress: runAddress,
+                    sessionID: `apple2_${Date.now()}`
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status} ${response.statusText}`);
+            }
+            const result = await response.json();
+            if (result.error) {
+                throw new Error(result.error);
+            }
+            // Decode disk image
+            const diskData = Uint8Array.from(atob(result.disk), c => c.charCodeAt(0));
+            console.log(`Apple2EPlatform: Bootable disk created: ${result.filename}, ${diskData.length} bytes`);
+            // Store disk blob for download
+            // Create a new ArrayBuffer to avoid SharedArrayBuffer issues
+            const diskBuffer = new ArrayBuffer(diskData.length);
+            new Uint8Array(diskBuffer).set(diskData);
+            this.currentDiskBlob = new Blob([diskBuffer], { type: 'application/octet-stream' });
+            console.log(`Apple2EPlatform: Disk blob stored for download: ${this.currentDiskBlob.size} bytes`);
+            // Send disk to iframe (will be loaded into drive 2, after DOS boots from drive 1)
+            this.iframe.contentWindow.postMessage({
+                type: 'load_disk',
+                data: {
+                    drive: 2, // Load program disk into drive 2 (DOS master will be in drive 1)
+                    filename: result.filename,
+                    diskData: Array.from(diskData),
+                    runCommand: `BRUN ${filename}.BIN\r`
+                }
+            }, '*');
+            // Clear loading flag after a delay
+            setTimeout(() => {
+                this.isLoadingProgram = false;
+            }, 5000);
+        }
+        catch (error) {
+            console.error('Apple2EPlatform: Error creating bootable disk via PHP API:', error);
+            this.isLoadingProgram = false;
+            // No fallback - we need the PHP API to work
+            throw error;
         }
     }
     sendROMToEmulator(rom) {

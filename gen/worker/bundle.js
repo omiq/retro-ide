@@ -2802,6 +2802,13 @@
           libargs: ["apple2.lib"],
           acmeargs: ["-f", "apple"]
         },
+        "apple2e": {
+          arch: "6502",
+          define: ["__APPLE2__"],
+          cfgfile: "apple2.cfg",
+          libargs: ["apple2.lib"],
+          acmeargs: ["-f", "apple"]
+        },
         "atari8-800xl.disk": {
           arch: "6502",
           define: ["__ATARI__"],
@@ -3458,6 +3465,8 @@
       name = "65-atari2600";
     if (name === "65-exidy")
       name = "65-none";
+    if (name === "65-apple2e")
+      name = "65-apple2";
     if (!fsMeta[name])
       throw Error("No filesystem for '" + name + "'");
     FS.mkdir("/share");
@@ -16474,6 +16483,10 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
       TOOL_PRELOADFS = {
         "cc65-apple2": "65-apple2",
         "ca65-apple2": "65-apple2",
+        "cc65-apple2e": "65-apple2",
+        "ca65-apple2e": "65-apple2",
+        "ld65-apple2e": "65-apple2",
+        "65-apple2e": "65-apple2",
         "cc65-c64": "65-c64",
         "ca65-c64": "65-c64",
         "cc65-vic20": "65-vic20",

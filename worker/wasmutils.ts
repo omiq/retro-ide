@@ -151,6 +151,7 @@ export function setupFS(FS, name: string) {
   if (name === '65-devel') name = '65-none'; // TODO
   if (name === '65-vcs') name = '65-atari2600'; // TODO
   if (name === '65-exidy') name = '65-none'; // TODO
+  if (name === '65-apple2e') name = '65-apple2'; // apple2e uses same filesystem as apple2
 
   if (!fsMeta[name]) throw Error("No filesystem for '" + name + "'");
   FS.mkdir('/share');
