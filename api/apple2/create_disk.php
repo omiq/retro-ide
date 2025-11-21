@@ -465,33 +465,25 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
         exec($deleteCmd, $deleteOutput, $deleteReturnCode);
         // Ignore delete errors - file might not exist, which is fine
         
-        // Create properly formatted binary file for DOS 3.3
-        // DOS 3.3 binary files need load address at start and run address at end
-        $formattedBinFile = "{$sessionDir}/{$filename}_formatted.BIN";
-        $formattedBinary = '';
-        // Add load address (2 bytes, little-endian)
-        $formattedBinary .= chr($loadAddress & 0xFF);
-        $formattedBinary .= chr(($loadAddress >> 8) & 0xFF);
-        // Add program data
-        $formattedBinary .= $binaryData;
-        // Add run address (2 bytes, little-endian)
-        $formattedBinary .= chr($runAddress & 0xFF);
-        $formattedBinary .= chr(($runAddress >> 8) & 0xFF);
-        
-        if (file_put_contents($formattedBinFile, $formattedBinary) === false) {
-            return ['error' => "Failed to write formatted binary file: {$formattedBinFile}"];
+        // Use the binary file as-is (AppleCommander -as can handle AppleSingle format directly)
+        // The shell script uses the binary directly from cl65 output, which is AppleSingle format
+        // We should do the same - use the binary as received (it already has the AppleSingle header)
+        $binFile = "{$sessionDir}/{$filename}.BIN";
+        if (file_put_contents($binFile, $binaryData) === false) {
+            return ['error' => "Failed to write binary file: {$binFile}"];
         }
         
         // Use -as flag to add file as BIN type (uppercase, as per tutorial Makefile)
         // Note: AppleCommander -as syntax: -as <disk> <filename> <type> < <inputfile>
         // The filename should NOT include .BIN extension when using -as
+        // Use the binary file directly (AppleCommander handles AppleSingle format)
         if ($appleCommanderExe) {
             $cmd = sprintf(
                 '%s -as %s %s BIN < %s 2>&1',
                 escapeshellarg($appleCommanderExe),
                 escapeshellarg(basename($dskFile)),
                 escapeshellarg($filename), // No .BIN extension
-                escapeshellarg(basename($formattedBinFile))
+                escapeshellarg(basename($binFile))
             );
         } else {
             $cmd = sprintf(
@@ -500,7 +492,7 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
                 escapeshellarg($appleCommanderJar),
                 escapeshellarg(basename($dskFile)),
                 escapeshellarg($filename), // No .BIN extension
-                escapeshellarg(basename($formattedBinFile))
+                escapeshellarg(basename($binFile))
             );
         }
         
@@ -615,7 +607,6 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
                 
                 // Cleanup
                 @unlink($binFile);
-                @unlink($formattedBinFile);
                 @unlink($startupBasTemp);
                 @unlink($dskFile);
                 @rmdir($sessionDir);

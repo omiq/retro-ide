@@ -824,13 +824,14 @@ export class Apple2EPlatform implements Platform {
       return;
     }
     
-    // Parse binary header to get load address and strip header
-    const { loadAddress, runAddress, headerSize, programData: actualProgramData } = this.parseBinaryHeader(programData);
+    // Parse binary header to get load address (for logging)
+    // But send the FULL binary (with AppleSingle header) to PHP, just like the shell script does
+    const { loadAddress, runAddress } = this.parseBinaryHeader(programData);
     
     // Extract filename from title
     const filename = title.replace(/\.[^.]*$/, '').toUpperCase().substring(0, 8) || 'PROGRAM';
     
-    console.log(`Apple2EPlatform: Creating bootable disk for ${filename} - Load: $${loadAddress.toString(16)}, Run: $${runAddress.toString(16)}, Size: ${actualProgramData.length} bytes`);
+    console.log(`Apple2EPlatform: Creating bootable disk for ${filename} - Load: $${loadAddress.toString(16)}, Run: $${runAddress.toString(16)}, Size: ${programData.length} bytes (full binary with header)`);
     
     try {
       // Call PHP API to create bootable disk
@@ -841,7 +842,8 @@ export class Apple2EPlatform implements Platform {
       const API_BASE_URL = isLocalhost 
         ? window.location.origin  // Use same origin (localhost) for local development
         : 'https://ide.retrogamecoders.com';  // Production server
-      const binaryBase64 = btoa(String.fromCharCode(...actualProgramData));
+      // Send the FULL binary (with AppleSingle header) - AppleCommander can handle it directly
+      const binaryBase64 = btoa(String.fromCharCode(...programData));
       
       const response = await fetch(`${API_BASE_URL}/api/apple2/create_disk.php`, {
         method: 'POST',
