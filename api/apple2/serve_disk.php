@@ -69,6 +69,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Serve the disk file
     // URL format: /serve_disk.php/disk_ID.dsk
     // Extract file ID from path (everything before .dsk)
+    
+    // Set CORS headers first (before any output)
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
+    
     $requestUri = $_SERVER['REQUEST_URI'];
     $pathInfo = isset($_SERVER['PATH_INFO']) ? $_SERVER['PATH_INFO'] : '';
     
@@ -82,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $fileId = $matches[1];
         } else {
             http_response_code(400);
+            header('Content-Type: text/plain');
             exit('Invalid URL format. Expected: /serve_disk.php/disk_ID.dsk');
         }
     }
@@ -93,6 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (!file_exists($tempFile)) {
         http_response_code(404);
+        header('Content-Type: text/plain');
         // Log for debugging (remove in production if needed)
         error_log("serve_disk.php: File not found - ID: $fileId, Path: $tempFile");
         exit('File not found');
@@ -102,6 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (time() - filemtime($tempFile) > 3600) {
         @unlink($tempFile);
         http_response_code(404);
+        header('Content-Type: text/plain');
         exit('File expired');
     }
     
