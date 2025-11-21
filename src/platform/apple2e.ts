@@ -188,8 +188,11 @@ export class Apple2EPlatform implements Platform {
 
   pause(): void {
     console.log('Apple2EPlatform pause() called');
+    // Don't pause when clicking on the iframe - it handles its own events
+    // Only pause if explicitly requested (not from focus/click events)
     if (this.iframe && this.iframe.contentWindow) {
-      this.iframe.contentWindow.postMessage({ type: 'stop' }, '*');
+      // Don't send stop message - let iframe handle its own pause/resume
+      // this.iframe.contentWindow.postMessage({ type: 'stop' }, '*');
     }
   }
   
@@ -522,71 +525,9 @@ export class Apple2EPlatform implements Platform {
       console.log('Apple2EPlatform: Detected compiled binary, creating disk image');
       this.loadCompiledProgram(title, rom);
     } else {
-      console.log('Apple2EPlatform: Detected BASIC program, sending as text');
-      // For BASIC programs, we'll send them as text to be typed into the emulator
-      const programText = new TextDecoder().decode(rom);
-      const programHash = programText.substring(0, 50);
-      
-      if (this.isLoadingProgram) {
-        console.warn('Apple2EPlatform: Already loading a program, ignoring duplicate request');
-        return;
-      }
-      
-      if (this.lastLoadedProgram === programHash) {
-        console.warn('Apple2EPlatform: Same program already loaded, ignoring duplicate request');
-        return;
-      }
-      
-      // Mark as loading and remember this program
-      this.isLoadingProgram = true;
-      this.lastLoadedProgram = programHash;
-      
-      if (this.iframe && this.iframe.contentWindow) {
-        // Always wait for emulator to be ready, even if emulatorReady flag is set
-        // This prevents race conditions when switching files quickly
-        const sendWhenReady = () => {
-          if (!this.iframe || !this.iframe.contentWindow) {
-            console.error('Apple2EPlatform: iframe lost during wait');
-            return;
-          }
-          
-          // Double-check emulator is actually ready by checking the iframe
-          const iframeWindow = this.iframe.contentWindow as any;
-          if (!iframeWindow.apple2 && !this.emulatorReady) {
-            console.log('Apple2EPlatform: Emulator not ready yet, waiting...');
-            setTimeout(sendWhenReady, 100);
-            return;
-          }
-          
-          // Emulator is ready, send the program
-          console.log('Apple2EPlatform: Emulator ready, sending program');
-          this.sendROMToEmulator(rom);
-        };
-        
-        if (!this.emulatorReady) {
-          console.log('Apple2EPlatform: Emulator not ready yet, waiting...');
-          // Wait for emulator to be ready
-          const checkReady = setInterval(() => {
-            if (this.emulatorReady && this.iframe && this.iframe.contentWindow) {
-              clearInterval(checkReady);
-              sendWhenReady();
-            }
-          }, 100);
-          // Timeout after 10 seconds
-          setTimeout(() => {
-            clearInterval(checkReady);
-            if (this.emulatorReady) {
-              sendWhenReady();
-            } else {
-              console.error('Apple2EPlatform: Timeout waiting for emulator to be ready');
-            }
-          }, 10000);
-        } else {
-          // Even if flag says ready, verify and wait a bit to ensure stability
-          console.log('Apple2EPlatform: Emulator ready flag set, verifying...');
-          setTimeout(sendWhenReady, 100);
-        }
-      }
+      console.log('Apple2EPlatform: Detected BASIC program, creating disk image');
+      // For BASIC programs, create a disk with the BASIC program using AppleCommander
+      this.loadBasicProgram(title, rom);
     }
   }
   
@@ -817,6 +758,82 @@ export class Apple2EPlatform implements Platform {
     return { loadAddress, runAddress, headerSize, programData };
   }
   
+  private async loadBasicProgram(title: string, programData: Uint8Array): Promise<void> {
+    if (!this.iframe || !this.iframe.contentWindow) {
+      console.error('Apple2EPlatform: Cannot load program - iframe not available');
+      this.isLoadingProgram = false;
+      return;
+    }
+    
+    // Extract filename from title
+    const filename = title.replace(/\.[^.]*$/, '').toUpperCase().substring(0, 8) || 'PROGRAM';
+    
+    // Decode BASIC program text
+    const basicText = new TextDecoder().decode(programData);
+    
+    console.log(`Apple2EPlatform: Creating bootable disk for BASIC program ${filename}, ${basicText.length} bytes`);
+    
+    try {
+      // Call PHP API to create bootable disk with BASIC program
+      const API_BASE_URL = 'https://ide.retrogamecoders.com';
+      
+      const response = await fetch(`${API_BASE_URL}/api/apple2/create_disk.php`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          basic: basicText,
+          filename: filename,
+          loadAddress: 0,
+          runAddress: 0,
+          sessionID: `apple2_${Date.now()}`
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      
+      // Decode disk image
+      const diskData = Uint8Array.from(atob(result.disk), c => c.charCodeAt(0));
+      
+      console.log(`Apple2EPlatform: Bootable disk created: ${result.filename}, ${diskData.length} bytes`);
+      
+      // Store disk blob for download
+      const diskBuffer = new ArrayBuffer(diskData.length);
+      new Uint8Array(diskBuffer).set(diskData);
+      this.currentDiskBlob = new Blob([diskBuffer], { type: 'application/octet-stream' });
+      console.log(`Apple2EPlatform: Disk blob stored for download: ${this.currentDiskBlob.size} bytes`);
+      
+      // Send disk to iframe - it contains the BASIC program
+      this.iframe.contentWindow.postMessage({
+        type: 'load_disk',
+        data: {
+          drive: 1,
+          filename: result.filename,
+          diskData: Array.from(diskData)
+        }
+      }, '*');
+      
+      // Clear loading flag after a delay
+      setTimeout(() => {
+        this.isLoadingProgram = false;
+      }, 5000);
+    } catch (error) {
+      console.error('Apple2EPlatform: Error creating bootable disk via PHP API:', error);
+      this.isLoadingProgram = false;
+      throw error;
+    }
+  }
+  
   private async loadCompiledProgram(title: string, programData: Uint8Array): Promise<void> {
     if (!this.iframe || !this.iframe.contentWindow) {
       console.error('Apple2EPlatform: Cannot load program - iframe not available');
@@ -835,13 +852,8 @@ export class Apple2EPlatform implements Platform {
     
     try {
       // Call PHP API to create bootable disk
-      // Use localhost API when running locally, otherwise use production server
-      const isLocalhost = window.location.hostname === 'localhost' || 
-                         window.location.hostname === '127.0.0.1' ||
-                         window.location.hostname === '';
-      const API_BASE_URL = isLocalhost 
-        ? window.location.origin  // Use same origin (localhost) for local development
-        : 'https://ide.retrogamecoders.com';  // Production server
+      // Always use production server - local Python server doesn't support PHP/POST
+      const API_BASE_URL = 'https://ide.retrogamecoders.com';
       // Send the FULL binary (with AppleSingle header) - AppleCommander can handle it directly
       const binaryBase64 = btoa(String.fromCharCode(...programData));
       
@@ -882,14 +894,16 @@ export class Apple2EPlatform implements Platform {
       this.currentDiskBlob = new Blob([diskBuffer], { type: 'application/octet-stream' });
       console.log(`Apple2EPlatform: Disk blob stored for download: ${this.currentDiskBlob.size} bytes`);
       
-      // Send disk to iframe (will be loaded into drive 2, after DOS boots from drive 1)
+      // Send disk to iframe - it's bootable and will auto-execute STARTUP.BAS (HELLO)
+      // STARTUP.BAS contains: 10 PRINT CHR$(4);"BRUN PROG"
+      // So we don't need to type anything - just boot and let it auto-execute
       this.iframe.contentWindow.postMessage({
         type: 'load_disk',
         data: {
-          drive: 2, // Load program disk into drive 2 (DOS master will be in drive 1)
+          drive: 1, // Load bootable disk into drive 1 (it contains DOS + program + auto-executing BASIC)
           filename: result.filename,
-          diskData: Array.from(diskData),
-          runCommand: `BRUN ${filename}.BIN\r`
+          diskData: Array.from(diskData)
+          // No runCommand - the disk auto-executes on boot
         }
       }, '*');
       

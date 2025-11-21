@@ -30,19 +30,28 @@ if (json_last_error() !== JSON_ERROR_NONE) {
     exit(json_encode(['error' => 'Invalid JSON: ' . json_last_error_msg()]));
 }
 
-// Validate required fields
-if (!isset($data['binary']) || !isset($data['filename']) || !isset($data['loadAddress']) || !isset($data['runAddress'])) {
+// Check if this is a BASIC program or binary
+$isBasic = isset($data['basic']) && !empty($data['basic']);
+$isBinary = isset($data['binary']) && !empty($data['binary']);
+
+if (!$isBasic && !$isBinary) {
     http_response_code(400);
-    exit(json_encode(['error' => 'Missing required fields: binary, filename, loadAddress, or runAddress']));
+    exit(json_encode(['error' => 'Missing required field: either binary or basic must be provided']));
+}
+
+if ($isBinary && (!isset($data['loadAddress']) || !isset($data['runAddress']))) {
+    http_response_code(400);
+    exit(json_encode(['error' => 'Missing required fields for binary: loadAddress or runAddress']));
 }
 
 // Optional: use DOS master disk as base (creates bootable disk with DOS + program)
 $useDosMaster = isset($data['useDosMaster']) ? (bool)$data['useDosMaster'] : true;
 
-$binaryData = $data['binary']; // Base64 encoded binary
-$filename = $data['filename']; // e.g., "KEYBOARD"
-$loadAddress = $data['loadAddress']; // e.g., 2051 (0x803)
-$runAddress = $data['runAddress']; // e.g., 2051 (0x803)
+$binaryData = $isBinary ? $data['binary'] : null; // Base64 encoded binary (optional)
+$basicText = $isBasic ? $data['basic'] : null; // BASIC program text (optional)
+$filename = $data['filename']; // e.g., "KEYBOARD" or "PROGRAM"
+$loadAddress = isset($data['loadAddress']) ? $data['loadAddress'] : 0; // e.g., 2051 (0x803) - not needed for BASIC
+$runAddress = isset($data['runAddress']) ? $data['runAddress'] : 0; // e.g., 2051 (0x803) - not needed for BASIC
 $sessionID = isset($data['sessionID']) ? $data['sessionID'] : uniqid('apple2_', true);
 
 // Security: validate sessionID
@@ -57,15 +66,18 @@ if (empty($filename)) {
     $filename = 'PROGRAM';
 }
 
-// Decode binary data
-$binaryBytes = base64_decode($binaryData);
-if ($binaryBytes === false) {
-    http_response_code(400);
-    exit(json_encode(['error' => 'Invalid base64 binary data']));
+// Decode binary data if provided
+$binaryBytes = null;
+if ($isBinary) {
+    $binaryBytes = base64_decode($binaryData);
+    if ($binaryBytes === false) {
+        http_response_code(400);
+        exit(json_encode(['error' => 'Invalid base64 binary data']));
+    }
 }
 
 // Create bootable disk
-$result = createBootableDisk($binaryBytes, $filename, $loadAddress, $runAddress, $sessionID);
+$result = createBootableDisk($binaryBytes, $basicText, $filename, $loadAddress, $runAddress, $sessionID);
 
 echo json_encode($result);
 
@@ -191,10 +203,10 @@ function ensureFreeSpace($disk, $requiredSectors) {
 }
 
 /**
- * Create a bootable Apple II DOS 3.3 disk image from binary data
- * Strategy: Copy DOS master disk and add program binary to it
+ * Create a bootable Apple II DOS 3.3 disk image from binary data or BASIC program
+ * Strategy: Copy DOS master disk and add program (binary or BASIC) to it
  */
-function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $sessionID) {
+function createBootableDisk($binaryData, $basicText, $filename, $loadAddress, $runAddress, $sessionID) {
     $sessionDir = "/tmp/apple2-{$sessionID}";
     
     // Create session directory
@@ -209,10 +221,22 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
         return ['error' => "Session directory is not writable: {$sessionDir}"];
     }
     
-    // Write binary file
-    $binFile = "{$sessionDir}/{$filename}.BIN";
-    if (file_put_contents($binFile, $binaryData) === false) {
-        return ['error' => "Failed to write binary file: {$binFile}"];
+    // Write binary file if provided
+    $binFile = null;
+    if ($binaryData !== null) {
+        $binFile = "{$sessionDir}/{$filename}.BIN";
+        if (file_put_contents($binFile, $binaryData) === false) {
+            return ['error' => "Failed to write binary file: {$binFile}"];
+        }
+    }
+    
+    // Write BASIC file if provided
+    $basFile = null;
+    if ($basicText !== null) {
+        $basFile = "{$sessionDir}/{$filename}.BAS";
+        if (file_put_contents($basFile, $basicText) === false) {
+            return ['error' => "Failed to write BASIC file: {$basFile}"];
+        }
     }
     
     // Find Java executable (try specific paths first, then fall back to 'java' in PATH)
@@ -440,16 +464,10 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
             }
         }
         
-        // Use AppleCommander to add binary file to the DOS master disk copy
-        // Based on tutorial shell script (make_disk.sh):
-        // 1. Add binary as "PROG" (always use PROG, matching shell script: $AC -as program.dsk PROG <hello.bin)
-        // 2. Delete HELLO if it exists
-        // 3. Add STARTUP.BAS as HELLO
+        // Use AppleCommander to add program (binary or BASIC) to the DOS master disk copy
+        $programName = strtoupper($filename);
         
-        // Always use "PROG" as the filename (matching shell script)
-        $programName = 'PROG';
-        
-        // First, delete PROG if it exists (to avoid conflicts)
+        // First, delete existing file if it exists (to avoid conflicts)
         if ($appleCommanderExe) {
             $deleteCmd = sprintf(
                 '%s -d %s %s 2>&1',
@@ -469,12 +487,67 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
         exec($deleteCmd, $deleteOutput, $deleteReturnCode);
         // Ignore delete errors - file might not exist, which is fine
         
-        // Use the binary file as-is (AppleCommander -as can handle AppleSingle format directly)
-        // The shell script uses the binary directly from cl65 output, which is AppleSingle format
-        // We should do the same - use the binary as received (it already has the AppleSingle header)
-        $binFile = "{$sessionDir}/{$programName}.BIN";
-        if (file_put_contents($binFile, $binaryData) === false) {
-            return ['error' => "Failed to write binary file: {$binFile}"];
+        $fileAdded = false;
+        $errorOutput = '';
+        
+        // Add binary file if provided
+        if ($binaryData !== null && $binFile !== null) {
+            // Use -as flag to add file as BIN type
+            if ($appleCommanderExe) {
+                $cmd = sprintf(
+                    '%s -as %s %s BIN < %s 2>&1',
+                    escapeshellarg($appleCommanderExe),
+                    escapeshellarg(basename($dskFile)),
+                    escapeshellarg($programName),
+                    escapeshellarg(basename($binFile))
+                );
+            } else {
+                $cmd = sprintf(
+                    '%s -jar %s -as %s %s BIN < %s 2>&1',
+                    escapeshellarg($javaExe),
+                    escapeshellarg($appleCommanderJar),
+                    escapeshellarg(basename($dskFile)),
+                    escapeshellarg($programName),
+                    escapeshellarg(basename($binFile))
+                );
+            }
+            
+            exec($cmd, $output, $returnCode);
+            $errorOutput = implode("\n", $output);
+            
+            if ($returnCode === 0 && file_exists($dskFile) && filesize($dskFile) === 143360) {
+                $fileAdded = true;
+            }
+        }
+        
+        // Add BASIC file if provided
+        if ($basicText !== null && $basFile !== null) {
+            // Use -bas flag to add file as BASIC type
+            if ($appleCommanderExe) {
+                $cmd = sprintf(
+                    '%s -bas %s %s < %s 2>&1',
+                    escapeshellarg($appleCommanderExe),
+                    escapeshellarg(basename($dskFile)),
+                    escapeshellarg($programName),
+                    escapeshellarg(basename($basFile))
+                );
+            } else {
+                $cmd = sprintf(
+                    '%s -jar %s -bas %s %s < %s 2>&1',
+                    escapeshellarg($javaExe),
+                    escapeshellarg($appleCommanderJar),
+                    escapeshellarg(basename($dskFile)),
+                    escapeshellarg($programName),
+                    escapeshellarg(basename($basFile))
+                );
+            }
+            
+            exec($cmd, $output, $returnCode);
+            $errorOutput = implode("\n", $output);
+            
+            if ($returnCode === 0 && file_exists($dskFile) && filesize($dskFile) === 143360) {
+                $fileAdded = true;
+            }
         }
         
         // Use -as flag to add file as BIN type (uppercase, as per tutorial Makefile)
@@ -527,108 +600,114 @@ function createBootableDisk($binaryData, $filename, $loadAddress, $runAddress, $
             exec($verifyCmd, $verifyOutput, $verifyReturnCode);
             $verifyOutputStr = implode("\n", $verifyOutput);
             
-              // Check if PROG appears in the catalog (must be exact match, not just return code)
-              $foundInCatalog = stripos($verifyOutputStr, 'PROG') !== false;
+              // Check if program appears in the catalog
+              $foundInCatalog = stripos($verifyOutputStr, $programName) !== false;
             
             if ($foundInCatalog && $verifyReturnCode === 0) {
-                // Binary file successfully added, now add auto-executing STARTUP.BAS
-                // This matches the working shell script approach
-                // Make sure we're still in the session directory
-                if (!chdir($sessionDir)) {
-                    chdir($originalDir);
-                    return ['error' => "Failed to change to session directory for STARTUP.BAS: {$sessionDir}"];
-                }
-                
-                $startupBasFile = __DIR__ . '/STARTUP.BAS';
-                if (file_exists($startupBasFile)) {
-                    // Use the provided STARTUP.BAS file
-                    $startupBasContent = file_get_contents($startupBasFile);
-                } else {
-                    // Create STARTUP.BAS that auto-executes the binary
-                    // Format: 10 PRINT CHR$(4);"BRUN PROG"
-                    // Always use "PROG" to match the binary filename
-                    $startupBasContent = "10 PRINT CHR$(4);\"BRUN PROG\"\n";
-                }
-                
-                // Write STARTUP.BAS to temp file
-                $startupBasTemp = "{$sessionDir}/STARTUP.BAS";
-                if (file_put_contents($startupBasTemp, $startupBasContent) === false) {
-                    chdir($originalDir);
-                    return ['error' => "Failed to write STARTUP.BAS file: {$startupBasTemp}"];
-                }
-                
-                // Delete HELLO if it exists (as per shell script)
-                if ($appleCommanderExe) {
-                    $deleteHelloCmd = sprintf(
-                        '%s -d %s HELLO 2>&1',
-                        escapeshellarg($appleCommanderExe),
-                        escapeshellarg(basename($dskFile))
-                    );
-                } else {
-                    $deleteHelloCmd = sprintf(
-                        '%s -jar %s -d %s HELLO 2>&1',
-                        escapeshellarg($javaExe),
-                        escapeshellarg($appleCommanderJar),
-                        escapeshellarg(basename($dskFile))
-                    );
-                }
-                exec($deleteHelloCmd, $deleteHelloOutput, $deleteHelloReturnCode);
-                // Ignore errors - HELLO might not exist
-                
-                // Add STARTUP.BAS as HELLO (auto-executing BASIC file)
-                if ($appleCommanderExe) {
-                    $addStartupCmd = sprintf(
-                        '%s -bas %s HELLO < %s 2>&1',
-                        escapeshellarg($appleCommanderExe),
-                        escapeshellarg(basename($dskFile)),
-                        escapeshellarg(basename($startupBasTemp))
-                    );
-                } else {
-                    $addStartupCmd = sprintf(
-                        '%s -jar %s -bas %s HELLO < %s 2>&1',
-                        escapeshellarg($javaExe),
-                        escapeshellarg($appleCommanderJar),
-                        escapeshellarg(basename($dskFile)),
-                        escapeshellarg(basename($startupBasTemp))
-                    );
-                }
-                exec($addStartupCmd, $addStartupOutput, $addStartupReturnCode);
-                $addStartupOutputStr = implode("\n", $addStartupOutput);
-                
-                if ($addStartupReturnCode !== 0) {
-                    error_log("AppleCommander: Failed to add STARTUP.BAS. Output: {$addStartupOutputStr}");
-                    // Continue anyway - the binary is already on the disk
+                // File successfully added
+                // For binary files, add auto-executing STARTUP.BAS as HELLO
+                if ($binaryData !== null) {
+                    // Make sure we're still in the session directory
+                    if (!chdir($sessionDir)) {
+                        chdir($originalDir);
+                        return ['error' => "Failed to change to session directory for STARTUP.BAS: {$sessionDir}"];
+                    }
+                    
+                    $startupBasFile = __DIR__ . '/STARTUP.BAS';
+                    if (file_exists($startupBasFile)) {
+                        $startupBasContent = file_get_contents($startupBasFile);
+                    } else {
+                        // Create STARTUP.BAS that auto-executes the binary
+                        $startupBasContent = "10 PRINT CHR$(4);\"BRUN {$programName}\"\n";
+                    }
+                    
+                    $startupBasTemp = "{$sessionDir}/STARTUP.BAS";
+                    if (file_put_contents($startupBasTemp, $startupBasContent) === false) {
+                        chdir($originalDir);
+                        return ['error' => "Failed to write STARTUP.BAS file: {$startupBasTemp}"];
+                    }
+                    
+                    // Delete HELLO if it exists
+                    if ($appleCommanderExe) {
+                        $deleteHelloCmd = sprintf(
+                            '%s -d %s HELLO 2>&1',
+                            escapeshellarg($appleCommanderExe),
+                            escapeshellarg(basename($dskFile))
+                        );
+                    } else {
+                        $deleteHelloCmd = sprintf(
+                            '%s -jar %s -d %s HELLO 2>&1',
+                            escapeshellarg($javaExe),
+                            escapeshellarg($appleCommanderJar),
+                            escapeshellarg(basename($dskFile))
+                        );
+                    }
+                    exec($deleteHelloCmd, $deleteHelloOutput, $deleteHelloReturnCode);
+                    
+                    // Add STARTUP.BAS as HELLO (auto-executing BASIC file)
+                    if ($appleCommanderExe) {
+                        $addStartupCmd = sprintf(
+                            '%s -bas %s HELLO < %s 2>&1',
+                            escapeshellarg($appleCommanderExe),
+                            escapeshellarg(basename($dskFile)),
+                            escapeshellarg(basename($startupBasTemp))
+                        );
+                    } else {
+                        $addStartupCmd = sprintf(
+                            '%s -jar %s -bas %s HELLO < %s 2>&1',
+                            escapeshellarg($javaExe),
+                            escapeshellarg($appleCommanderJar),
+                            escapeshellarg(basename($dskFile)),
+                            escapeshellarg(basename($startupBasTemp))
+                        );
+                    }
+                    exec($addStartupCmd, $addStartupOutput, $addStartupReturnCode);
+                    $addStartupOutputStr = implode("\n", $addStartupOutput);
+                    
+                    if ($addStartupReturnCode !== 0) {
+                        error_log("AppleCommander: Failed to add STARTUP.BAS. Output: {$addStartupOutputStr}");
+                    }
+                    
+                    @unlink($startupBasTemp);
                 }
                 
                 // Restore original directory before reading disk
                 chdir($originalDir);
                 
-                // File appears to be on disk
+                // Read disk image
                 $diskData = file_get_contents($dskFile);
                 if ($diskData === false) {
                     return ['error' => "Failed to read created disk image: {$dskFile}"];
                 }
                 
                 // Cleanup
-                @unlink($binFile);
-                @unlink($startupBasTemp);
+                if ($binFile) @unlink($binFile);
+                if ($basFile) @unlink($basFile);
                 @unlink($dskFile);
                 @rmdir($sessionDir);
                 
                 return [
                     'disk' => base64_encode($diskData),
                     'filename' => "{$filename}.dsk",
-                    'debug' => "AppleCommander added file successfully. Catalog listing:\n{$verifyOutputStr}\nSTARTUP.BAS added: " . ($addStartupReturnCode === 0 ? "Yes" : "No ({$addStartupOutputStr})")
+                    'size' => strlen($diskData)
                 ];
             } else {
-                // File not found in catalog, log error and try manual method
-                error_log("AppleCommander: File 'PROG' not found in disk catalog. Return code: {$verifyReturnCode}, Output: {$verifyOutputStr}");
-                return createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $sessionDir, $dosMasterDisk);
+                // File not found in catalog, log error and try manual method for binary files
+                if ($binaryData !== null) {
+                    error_log("AppleCommander: File '{$programName}' not found in disk catalog. Return code: {$verifyReturnCode}, Output: {$verifyOutputStr}");
+                    return createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $sessionDir, $dosMasterDisk);
+                } else {
+                    return ['error' => "Failed to verify BASIC file on disk. Output: {$verifyOutputStr}"];
+                }
             }
         } else {
-            // AppleCommander failed, try manual method
-            error_log("AppleCommander error (exit code {$returnCode}, disk size: " . (file_exists($dskFile) ? filesize($dskFile) : 'missing') . "): {$errorOutput}");
-            return createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $sessionDir, $dosMasterDisk);
+            // AppleCommander failed, try manual method for binary files
+            if ($binaryData !== null) {
+                error_log("AppleCommander error (exit code {$returnCode}, disk size: " . (file_exists($dskFile) ? filesize($dskFile) : 'missing') . "): {$errorOutput}");
+                return createDiskManually($binaryData, $filename, $loadAddress, $runAddress, $sessionDir, $dosMasterDisk);
+            } else {
+                return ['error' => "AppleCommander failed to add BASIC file. Return code: {$returnCode}, Output: {$errorOutput}"];
+            }
         }
     } else {
         // AppleCommander not available, use manual method

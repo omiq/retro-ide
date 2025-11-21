@@ -1069,6 +1069,11 @@ function setupBreakpoint(btnid) {
         setDebugButtonState(btnid, "active");
 }
 function _pause() {
+    // Don't pause Apple IIe when clicking on iframe - it handles its own events
+    if (exports.platform_id === 'apple2e') {
+        // Apple IIe is in an iframe and handles its own pause/resume
+        return;
+    }
     if (exports.platform && exports.platform.isRunning()) {
         exports.platform.pause();
         console.log("Paused");
@@ -1858,7 +1863,12 @@ function showInstructions() {
     var vcanvas = $("#emulator").find("canvas");
     if (vcanvas) {
         vcanvas.on('focus', () => {
-            if (exports.platform.isRunning()) {
+            // Don't pause Apple IIe when focusing - it's in an iframe and handles its own events
+            if (exports.platform_id === 'apple2e') {
+                // Apple IIe handles focus in the iframe, don't pause here
+                return;
+            }
+            if (exports.platform && exports.platform.isRunning && exports.platform.isRunning()) {
                 div.fadeIn(200);
                 // toggle sound for browser autoplay
                 exports.platform.pause();
