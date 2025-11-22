@@ -943,7 +943,11 @@ async function setCompileOutput(data: WorkerResult) {
         if (!userPaused) _resume();
         writeOutputROMFile();
         // Track successful compilation
-        gaEvent('compile', 'success', platform_id, rom.length.toString());
+        // Handle different output types: arrays/strings have .length, objects don't
+        const romSize = (rom && typeof rom.length === 'number') ? rom.length.toString() : 
+                       (rom && typeof rom === 'object') ? JSON.stringify(rom).length.toString() : 
+                       '0';
+        gaEvent('compile', 'success', platform_id, romSize);
       } catch (e) {
         console.log(e);
         toolbar.addClass("has-errors");

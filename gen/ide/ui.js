@@ -912,7 +912,11 @@ async function setCompileOutput(data) {
                     _resume();
                 writeOutputROMFile();
                 // Track successful compilation
-                (0, analytics_1.gaEvent)('compile', 'success', exports.platform_id, rom.length.toString());
+                // Handle different output types: arrays/strings have .length, objects don't
+                const romSize = (rom && typeof rom.length === 'number') ? rom.length.toString() :
+                    (rom && typeof rom === 'object') ? JSON.stringify(rom).length.toString() :
+                        '0';
+                (0, analytics_1.gaEvent)('compile', 'success', exports.platform_id, romSize);
             }
             catch (e) {
                 console.log(e);
