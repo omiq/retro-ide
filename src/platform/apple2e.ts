@@ -6,6 +6,7 @@ const APPLE2E_PRESETS: Preset[] = [
   { id: 'colors.bas', name: 'Color Demo (BASIC)' },
   { id: 'graphics.bas', name: 'Graphics Demo (BASIC)' },
   { id: 'keyboard.bas', name: 'Keyboard Demo (BASIC)' },
+  { id: 'bite.bas', name: 'Apple Logo Demo (BASIC)' },
   { id: 'charset.bas', name: 'Charset Demo (BASIC)' },
   { id: 'game.bas', name: 'Simple Game (BASIC)' },
   { id: 'hello.c', name: 'Hello World (C)', category: 'C Tutorial' },
