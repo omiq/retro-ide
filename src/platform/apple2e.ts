@@ -85,10 +85,6 @@ export class Apple2EPlatform implements Platform {
     this.mainElement.innerHTML = '';
     this.mainElement.appendChild(this.iframe);
     
-    // Load iframe with cache busting
-    const cacheBuster = `?t=${Date.now()}`;
-    this.iframe.src = `apple2e-iframe.html${cacheBuster}`;
-    
     // CRITICAL: Don't intercept clicks on the iframe at all
     // Remove any event listeners that might block clicks
     // The iframe needs to handle its own clicks completely
@@ -104,8 +100,9 @@ export class Apple2EPlatform implements Platform {
     // Don't add any click handlers on the parent - let iframe handle everything
     console.log('Apple2EPlatform: Iframe created, clicks should pass through to iframe');
     
-    // Load the iframe
-    this.iframe.src = 'apple2e-iframe.html';
+    // TEST: Load the original working apple2js HTML file (copied to same origin)
+    const cacheBuster = `?t=${Date.now()}`;
+    this.iframe.src = `apple2js/apple2jse.html${cacheBuster}`;
     
     console.log('Apple2EPlatform: iframe created and loading');
     
@@ -1026,15 +1023,31 @@ export class Apple2EPlatform implements Platform {
       
       console.log(`Apple2EPlatform: Got disk URL: ${serveResult.url}`);
       
-      // Send URL to iframe - doLoadHTTP will load it (needs .dsk extension in URL)
-      this.iframe.contentWindow.postMessage({
-        type: 'load_disk_url',
-        data: {
-          drive: 1,
-          url: serveResult.url,
-          filename: result.filename
+      // Call doLoadHTTP directly on iframe window (same-origin, so we can access it)
+      if (this.iframe && this.iframe.contentWindow) {
+        const iframeWindow = this.iframe.contentWindow as any;
+        if (iframeWindow.Apple2 && typeof iframeWindow.Apple2.doLoadHTTP === 'function') {
+          console.log(`Apple2EPlatform: Calling doLoadHTTP directly on iframe...`);
+          try {
+            await iframeWindow.Apple2.doLoadHTTP(1, serveResult.url);
+            console.log('Apple2EPlatform: ✅ doLoadHTTP completed');
+          } catch (error) {
+            console.error('Apple2EPlatform: doLoadHTTP failed:', error);
+            throw error;
+          }
+        } else {
+          // Fallback to postMessage if doLoadHTTP not available
+          console.log('Apple2EPlatform: doLoadHTTP not available, using postMessage...');
+          this.iframe.contentWindow.postMessage({
+            type: 'load_disk_url',
+            data: {
+              drive: 1,
+              url: serveResult.url,
+              filename: result.filename
+            }
+          }, '*');
         }
-      }, '*');
+      }
       
       // Clear loading flag after a delay
       setTimeout(() => {
@@ -1157,15 +1170,31 @@ export class Apple2EPlatform implements Platform {
       
       console.log(`Apple2EPlatform: Got disk URL: ${serveResult.url}`);
       
-      // Send URL to iframe - doLoadHTTP will load it (needs .dsk extension in URL)
-      this.iframe.contentWindow.postMessage({
-        type: 'load_disk_url',
-        data: {
-          drive: 1,
-          url: serveResult.url,
-          filename: result.filename
+      // Call doLoadHTTP directly on iframe window (same-origin, so we can access it)
+      if (this.iframe && this.iframe.contentWindow) {
+        const iframeWindow = this.iframe.contentWindow as any;
+        if (iframeWindow.Apple2 && typeof iframeWindow.Apple2.doLoadHTTP === 'function') {
+          console.log(`Apple2EPlatform: Calling doLoadHTTP directly on iframe...`);
+          try {
+            await iframeWindow.Apple2.doLoadHTTP(1, serveResult.url);
+            console.log('Apple2EPlatform: ✅ doLoadHTTP completed');
+          } catch (error) {
+            console.error('Apple2EPlatform: doLoadHTTP failed:', error);
+            throw error;
+          }
+        } else {
+          // Fallback to postMessage if doLoadHTTP not available
+          console.log('Apple2EPlatform: doLoadHTTP not available, using postMessage...');
+          this.iframe.contentWindow.postMessage({
+            type: 'load_disk_url',
+            data: {
+              drive: 1,
+              url: serveResult.url,
+              filename: result.filename
+            }
+          }, '*');
         }
-      }, '*');
+      }
       
       // Clear loading flag after a delay
       setTimeout(() => {

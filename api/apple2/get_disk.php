@@ -1,11 +1,16 @@
 <?php
 // api/apple2/get_disk.php - Serve disk files with CORS headers
-// URL format: /api/apple2/get_disk.php/disk_ID.dsk
+// URL formats supported:
+//   - /api/apple2/get_disk.php/disk_ID.dsk (PATH_INFO)
+//   - /api/apple2/get_disk.php?file=disk_ID.dsk (query parameter)
 
-// Set CORS headers first
+// Set CORS headers FIRST - before any output or errors
+// Use header_remove() to clear any existing headers that might interfere
+header_remove('X-Powered-By');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Expose-Headers: Content-Length, Content-Type');
 
 // Handle preflight OPTIONS request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -13,26 +18,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// Get the requested filename from PATH_INFO or REQUEST_URI
-$pathInfo = isset($_SERVER['PATH_INFO']) ? $_SERVER['PATH_INFO'] : '';
-$requestUri = $_SERVER['REQUEST_URI'];
-
-// Extract filename from path
+// Get the requested filename from multiple sources (try all methods)
 $filename = null;
-if ($pathInfo) {
-    // PATH_INFO format: /disk_ID.dsk
-    $filename = basename($pathInfo);
-} else if ($requestUri) {
-    // Parse from REQUEST_URI: /get_disk.php/disk_ID.dsk
-    if (preg_match('/\/get_disk\.php\/([^\/\?]+\.dsk)/', $requestUri, $matches)) {
+
+// Method 1: Query parameter (most reliable with nginx)
+if (isset($_GET['file']) && !empty($_GET['file'])) {
+    $filename = $_GET['file'];
+}
+
+// Method 2: PATH_INFO (if nginx is configured to pass it)
+if (!$filename && isset($_SERVER['PATH_INFO']) && !empty($_SERVER['PATH_INFO'])) {
+    $filename = basename($_SERVER['PATH_INFO']);
+}
+
+// Method 3: Parse from REQUEST_URI
+if (!$filename && isset($_SERVER['REQUEST_URI'])) {
+    $requestUri = $_SERVER['REQUEST_URI'];
+    // Remove query string for parsing
+    $requestPath = parse_url($requestUri, PHP_URL_PATH);
+    if (preg_match('/\/get_disk\.php\/([^\/\?]+\.dsk)/', $requestPath, $matches)) {
         $filename = $matches[1];
     }
 }
 
 if (!$filename) {
     http_response_code(400);
-    header('Content-Type: text/plain');
-    exit('Invalid URL format. Expected: /get_disk.php/disk_ID.dsk');
+    header('Content-Type: application/json');
+    exit(json_encode(['error' => 'Invalid URL format. Expected: /get_disk.php/disk_ID.dsk or /get_disk.php?file=disk_ID.dsk']));
 }
 
 // Validate filename (must end in .dsk and match our pattern)
