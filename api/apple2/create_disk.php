@@ -514,22 +514,11 @@ function createBootableDisk($binaryData, $basicText, $filename, $loadAddress, $r
                 );
             }
             
-            // Log the command for debugging
-            error_log("AppleCommander binary add command: {$cmd}");
-            error_log("Binary file path: {$binFile}, exists: " . (file_exists($binFile) ? 'yes, size: ' . filesize($binFile) : 'no'));
-            error_log("Disk file path: {$dskFile}, exists: " . (file_exists($dskFile) ? 'yes, size: ' . filesize($dskFile) : 'no'));
-            
             exec($cmd, $output, $returnCode);
             $errorOutput = implode("\n", $output);
             
-            error_log("AppleCommander binary add return code: {$returnCode}");
-            error_log("AppleCommander binary add output: {$errorOutput}");
-            
             if ($returnCode === 0 && file_exists($dskFile) && filesize($dskFile) === 143360) {
                 $fileAdded = true;
-                error_log("Binary file added successfully");
-            } else {
-                error_log("AppleCommander binary add failed: returnCode={$returnCode}, diskSize=" . (file_exists($dskFile) ? filesize($dskFile) : 'missing'));
             }
         }
         

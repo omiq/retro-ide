@@ -1069,11 +1069,6 @@ function setupBreakpoint(btnid) {
         setDebugButtonState(btnid, "active");
 }
 function _pause() {
-    // Don't pause Apple IIe when clicking on iframe - it handles its own events
-    if (exports.platform_id === 'apple2e') {
-        // Apple IIe is in an iframe and handles its own pause/resume
-        return;
-    }
     if (exports.platform && exports.platform.isRunning()) {
         exports.platform.pause();
         console.log("Paused");
@@ -1101,19 +1096,6 @@ function resume() {
     if (!checkRunReady())
         return;
     clearBreakpoint();
-    // For Apple IIe platform, use the API's run() method
-    if (exports.platform_id === 'apple2e') {
-        const api = window.IDE.getApple2API();
-        if (api && api.run) {
-            console.log('Apple2E: Using API run() method');
-            api.run();
-            setDebugButtonState("go", "active");
-            if (errorWasRuntime) {
-                hideErrorAlerts();
-            }
-            return;
-        }
-    }
     if (!exports.platform.isRunning()) {
         exports.projectWindows.refresh(false);
     }

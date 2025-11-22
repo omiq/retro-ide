@@ -7,6 +7,8 @@ const APPLE2E_PRESETS: Preset[] = [
   { id: 'graphics.bas', name: 'Graphics Demo (BASIC)' },
   { id: 'keyboard.bas', name: 'Keyboard Demo (BASIC)' },
   { id: 'game.bas', name: 'Simple Game (BASIC)' },
+  { id: 'hello.c', name: 'Hello World (C)', category: 'C Tutorial' },
+  { id: 'keyboard.c', name: 'Keyboard Demo (C)' },
 ];
 
 export class Apple2EPlatform implements Platform {
@@ -24,14 +26,7 @@ export class Apple2EPlatform implements Platform {
     // Listen for messages from iframe
     window.addEventListener('message', (event) => {
       if (event.data && event.data.type === 'apple2e_ready') {
-        console.log('Apple2EPlatform: Emulator ready');
         this.emulatorReady = true;
-        
-        // Small delay to ensure emulator is fully initialized before accepting ROM loads
-        // This helps prevent race conditions when files are switched quickly
-        setTimeout(() => {
-          console.log('Apple2EPlatform: Emulator fully ready, can accept ROM loads');
-        }, 200);
       } else if (event.data && event.data.type === 'apple2e_error') {
         console.error('Apple2EPlatform: Emulator error:', event.data.error);
         this.emulatorReady = false;
@@ -48,12 +43,9 @@ export class Apple2EPlatform implements Platform {
   }
 
   async init(): Promise<void> {
-    console.log('Apple2EPlatform init() called');
   }
 
   start(): void {
-    console.log('Apple2EPlatform start() called');
-    
     // Create iframe for Apple IIe emulator
     this.iframe = document.createElement('iframe');
     this.iframe.id = 'apple2e-iframe';
@@ -61,23 +53,14 @@ export class Apple2EPlatform implements Platform {
     this.iframe.style.height = '600px';
     this.iframe.style.border = '1px solid #ccc';
     this.iframe.style.backgroundColor = '#000';
-    this.iframe.setAttribute('tabindex', '0'); // Make iframe focusable
-    // Note: 'pointer-events' is not a valid iframe allow attribute, but we handle events in the iframe itself
-    
-    // Don't add any event listeners to the iframe from parent
-    // The iframe should handle all its own events
-    // Cross-origin restrictions might prevent access anyway
-    console.log('Apple2EPlatform: Iframe will handle its own events');
+    this.iframe.setAttribute('tabindex', '0');
     
     // Prevent the IDE from pausing when clicking on the iframe
-    // The iframe should handle its own focus without triggering IDE pause/resume
     this.iframe.addEventListener('focus', (e) => {
-      // Don't let iframe focus trigger IDE pause
       e.stopPropagation();
     }, true);
     
     this.iframe.addEventListener('click', (e) => {
-      // Don't let iframe clicks trigger IDE pause
       e.stopPropagation();
     }, true);
     
@@ -85,26 +68,15 @@ export class Apple2EPlatform implements Platform {
     this.mainElement.innerHTML = '';
     this.mainElement.appendChild(this.iframe);
     
-    // CRITICAL: Don't intercept clicks on the iframe at all
-    // Remove any event listeners that might block clicks
-    // The iframe needs to handle its own clicks completely
-    
     // Ensure iframe container doesn't block pointer events
     this.mainElement.style.pointerEvents = 'auto';
     this.mainElement.style.userSelect = 'none';
-    
-    // Ensure iframe itself can receive clicks
     this.iframe.style.pointerEvents = 'auto';
     this.iframe.style.border = '1px solid #ccc';
     
-    // Don't add any click handlers on the parent - let iframe handle everything
-    console.log('Apple2EPlatform: Iframe created, clicks should pass through to iframe');
-    
-    // TEST: Load the original working apple2js HTML file (copied to same origin)
+    // Load the apple2js HTML file
     const cacheBuster = `?t=${Date.now()}`;
     this.iframe.src = `apple2js/apple2jse.html${cacheBuster}`;
-    
-    console.log('Apple2EPlatform: iframe created and loading');
     
     // Reset emulator when it becomes ready (ensures clean BASIC prompt on page load)
     const checkReady = setInterval(() => {
@@ -121,20 +93,31 @@ export class Apple2EPlatform implements Platform {
   }
 
   stop(): void {
-    console.log('Apple2EPlatform stop() called');
     if (this.iframe && this.iframe.contentWindow) {
       this.iframe.contentWindow.postMessage({ type: 'stop' }, '*');
     }
   }
 
   reset(): void {
-    console.log('Apple2EPlatform reset() called');
+    console.log('Apple2EPlatform: reset() called');
     if (this.iframe && this.iframe.contentWindow) {
       this.iframe.contentWindow.postMessage({ type: 'reset' }, '*');
+      console.log('Apple2EPlatform: Sent reset message to iframe');
+    } else {
+      console.log('Apple2EPlatform: iframe not available for reset');
     }
   }
 
   isRunning(): boolean {
+    if (!this.iframe || !this.iframe.contentWindow) return false;
+    try {
+      const iframeWindow = this.iframe.contentWindow as any;
+      if (iframeWindow.apple2 && typeof iframeWindow.apple2.isRunning === 'function') {
+        return iframeWindow.apple2.isRunning();
+      }
+    } catch (e) {
+      // Cross-origin or not ready
+    }
     return this.emulatorReady;
   }
 
@@ -184,31 +167,28 @@ export class Apple2EPlatform implements Platform {
   }
 
   pause(): void {
-    console.log('Apple2EPlatform pause() called');
-    // Don't pause when clicking on the iframe - it handles its own events
-    // Only pause if explicitly requested (not from focus/click events)
+    console.log('Apple2EPlatform: pause() called');
     if (this.iframe && this.iframe.contentWindow) {
-      // Don't send stop message - let iframe handle its own pause/resume
-      // this.iframe.contentWindow.postMessage({ type: 'stop' }, '*');
+      this.iframe.contentWindow.postMessage({ type: 'pause' }, '*');
+      console.log('Apple2EPlatform: Sent pause message to iframe');
+    } else {
+      console.log('Apple2EPlatform: iframe not available for pause');
     }
   }
   
   break(): void {
-    console.log('Apple2EPlatform break() called (Ctrl+C / BRK)');
     if (this.iframe && this.iframe.contentWindow) {
       this.iframe.contentWindow.postMessage({ type: 'break' }, '*');
     }
   }
 
   resume(): void {
-    console.log('Apple2EPlatform resume() called');
+    console.log('Apple2EPlatform: resume() called');
     if (this.iframe && this.iframe.contentWindow) {
-      this.iframe.contentWindow.postMessage({ type: 'run' }, '*');
-    }
-    // Also ensure emulator is running via API if available
-    const api = this.getApple2API();
-    if (api && api.apple2 && !api.apple2.isRunning()) {
-      api.apple2.run();
+      this.iframe.contentWindow.postMessage({ type: 'resume' }, '*');
+      console.log('Apple2EPlatform: Sent resume message to iframe');
+    } else {
+      console.log('Apple2EPlatform: iframe not available for resume');
     }
   }
   
@@ -670,7 +650,6 @@ export class Apple2EPlatform implements Platform {
   }
 
   loadROM(title: string, rom: Uint8Array): void {
-    console.log('Apple2EPlatform loadROM() called', { title, romLength: rom?.length });
     if (!rom || rom.length === 0) {
       console.warn('Apple2EPlatform: No ROM data provided');
       return;
@@ -680,21 +659,18 @@ export class Apple2EPlatform implements Platform {
     // Create a copy of the Uint8Array to ensure it's a proper ArrayBuffer
     const romCopy = new Uint8Array(rom);
     this.currentBinaryBlob = new Blob([romCopy], { type: 'application/octet-stream' });
-    console.log(`Apple2EPlatform: Binary blob stored for download: ${this.currentBinaryBlob.size} bytes`);
     
     // Detect if this is a compiled binary (C program) or BASIC text
     // Compiled binaries are typically > 100 bytes and don't decode to valid ASCII BASIC
     const isBinary = this.isCompiledBinary(rom);
     
     if (isBinary) {
-      console.log('Apple2EPlatform: Detected compiled binary, creating bootable disk image');
       // For compiled binaries, create a bootable disk image and load via doLoadHTTP
       // This ensures the program loads reliably and can be reloaded when code changes
       this.loadCompiledProgram(title, rom).catch(err => {
         console.error('Apple2EPlatform: Error loading compiled program:', err);
       });
     } else {
-      console.log('Apple2EPlatform: Detected BASIC program, creating disk image');
       // For BASIC programs, create a disk with the BASIC program using AppleCommander
       this.loadBasicProgram(title, rom).catch(err => {
         console.error('Apple2EPlatform: Error loading BASIC program:', err);
@@ -942,14 +918,11 @@ export class Apple2EPlatform implements Platform {
     // Decode BASIC program text
     const basicText = new TextDecoder().decode(programData);
     
-    console.log(`Apple2EPlatform: Creating bootable disk for BASIC program ${filename}, ${basicText.length} bytes`);
-    console.log(`Apple2EPlatform: BASIC program preview:`, basicText.substring(0, 200));
     
     try {
       // Call PHP API to create bootable disk with BASIC program
       const API_BASE_URL = 'https://ide.retrogamecoders.com';
       
-      console.log(`Apple2EPlatform: Calling PHP API to create disk with BASIC program...`);
       const response = await fetch(`${API_BASE_URL}/api/apple2/create_disk.php`, {
         method: 'POST',
         mode: 'cors',
@@ -965,7 +938,6 @@ export class Apple2EPlatform implements Platform {
         })
       });
       
-      console.log(`Apple2EPlatform: API response status: ${response.status}`);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -974,7 +946,6 @@ export class Apple2EPlatform implements Platform {
       }
       
       const result = await response.json();
-      console.log(`Apple2EPlatform: API result:`, result);
       
       if (result.error) {
         console.error(`Apple2EPlatform: API returned error:`, result.error);
@@ -1021,23 +992,19 @@ export class Apple2EPlatform implements Platform {
         throw new Error(serveResult.error);
       }
       
-      console.log(`Apple2EPlatform: Got disk URL: ${serveResult.url}`);
       
       // Call doLoadHTTP directly on iframe window (same-origin, so we can access it)
       if (this.iframe && this.iframe.contentWindow) {
         const iframeWindow = this.iframe.contentWindow as any;
         if (iframeWindow.Apple2 && typeof iframeWindow.Apple2.doLoadHTTP === 'function') {
-          console.log(`Apple2EPlatform: Calling doLoadHTTP directly on iframe...`);
           try {
             await iframeWindow.Apple2.doLoadHTTP(1, serveResult.url);
-            console.log('Apple2EPlatform: ✅ doLoadHTTP completed');
           } catch (error) {
             console.error('Apple2EPlatform: doLoadHTTP failed:', error);
             throw error;
           }
         } else {
           // Fallback to postMessage if doLoadHTTP not available
-          console.log('Apple2EPlatform: doLoadHTTP not available, using postMessage...');
           this.iframe.contentWindow.postMessage({
             type: 'load_disk_url',
             data: {
@@ -1099,7 +1066,6 @@ export class Apple2EPlatform implements Platform {
     // Extract filename from title
     const filename = title.replace(/\.[^.]*$/, '').toUpperCase().substring(0, 8) || 'PROGRAM';
     
-    console.log(`Apple2EPlatform: Creating bootable disk for ${filename} - Load: $${loadAddress.toString(16)}, Run: $${runAddress.toString(16)}, Size: ${programData.length} bytes (full binary with header)`);
     
     try {
       // Call PHP API to create bootable disk
@@ -1168,23 +1134,19 @@ export class Apple2EPlatform implements Platform {
         throw new Error(serveResult.error);
       }
       
-      console.log(`Apple2EPlatform: Got disk URL: ${serveResult.url}`);
       
       // Call doLoadHTTP directly on iframe window (same-origin, so we can access it)
       if (this.iframe && this.iframe.contentWindow) {
         const iframeWindow = this.iframe.contentWindow as any;
         if (iframeWindow.Apple2 && typeof iframeWindow.Apple2.doLoadHTTP === 'function') {
-          console.log(`Apple2EPlatform: Calling doLoadHTTP directly on iframe...`);
           try {
             await iframeWindow.Apple2.doLoadHTTP(1, serveResult.url);
-            console.log('Apple2EPlatform: ✅ doLoadHTTP completed');
           } catch (error) {
             console.error('Apple2EPlatform: doLoadHTTP failed:', error);
             throw error;
           }
         } else {
           // Fallback to postMessage if doLoadHTTP not available
-          console.log('Apple2EPlatform: doLoadHTTP not available, using postMessage...');
           this.iframe.contentWindow.postMessage({
             type: 'load_disk_url',
             data: {
