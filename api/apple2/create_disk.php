@@ -465,7 +465,9 @@ function createBootableDisk($binaryData, $basicText, $filename, $loadAddress, $r
         }
         
         // Use AppleCommander to add program (binary or BASIC) to the DOS master disk copy
-        $programName = strtoupper($filename);
+        // For binary files, always use "PROG" to match STARTUP.BAS which runs "BRUN PROG"
+        // For BASIC files, use the provided filename
+        $programName = ($binaryData !== null) ? 'PROG' : strtoupper($filename);
         
         // First, delete existing file if it exists (to avoid conflicts)
         if ($appleCommanderExe) {
