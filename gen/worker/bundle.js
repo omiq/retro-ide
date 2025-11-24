@@ -1,7 +1,9 @@
 (() => {
   var __create = Object.create;
   var __defProp = Object.defineProperty;
+  var __defProps = Object.defineProperties;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __getOwnPropSymbols = Object.getOwnPropertySymbols;
   var __getProtoOf = Object.getPrototypeOf;
@@ -19,6 +21,7 @@
       }
     return a;
   };
+  var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
   var __markAsModule = (target) => __defProp(target, "__esModule", { value: true });
   var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
     get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
@@ -232,7 +235,7 @@
       path: a.path || b.path
     };
   }
-  var CompileError, re_toks, TokenType, OPERATORS, BASICParser, ECMA55_MINIMAL, DARTMOUTH_4TH_EDITION, TINY_BASIC, HP_TIMESHARED_BASIC, DEC_BASIC_11, DEC_BASIC_PLUS, BASICODE, ALTAIR_BASIC41, APPLESOFT_BASIC, BASIC80, MODERN_BASIC, BUILTIN_DEFS, BUILTIN_MAP, DIALECTS, C64_TOKENS, C64_BASIC_START_ADDR;
+  var CompileError, re_toks, TokenType, OPERATORS, BASICParser, ECMA55_MINIMAL, DARTMOUTH_4TH_EDITION, TINY_BASIC, HP_TIMESHARED_BASIC, DEC_BASIC_11, DEC_BASIC_PLUS, BASICODE, ALTAIR_BASIC41, APPLESOFT_BASIC, BASIC80, MODERN_BASIC, BUILTIN_DEFS, BUILTIN_MAP, DIALECTS, C64_TOKENS, C64_BASIC_START_ADDR, VIC20_BASIC_START_ADDR;
   var init_compiler = __esm({
     "src/common/basic/compiler.ts"() {
       CompileError = class extends Error {
@@ -2591,6 +2594,7 @@
         "PI": 255
       };
       C64_BASIC_START_ADDR = 2049;
+      VIC20_BASIC_START_ADDR = 4097;
     }
   });
 
@@ -16189,6 +16193,666 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
     }
   });
 
+  // src/common/basic/vic20tokenizer.ts
+  var VIC20BasicTokenizer;
+  var init_vic20tokenizer = __esm({
+    "src/common/basic/vic20tokenizer.ts"() {
+      init_compiler();
+      VIC20BasicTokenizer = class {
+        constructor() {
+          this.tokens = __spreadValues({}, C64_TOKENS);
+          this.sortedTokens = Object.keys(this.tokens).sort((a, b) => b.length - a.length);
+        }
+        petsciiToByte(c) {
+          const code = c.charCodeAt(0);
+          if (code >= 32 && code <= 126) {
+            return code;
+          }
+          switch (c) {
+            case "^":
+              return 30;
+            case "[":
+              return 91;
+            case "]":
+              return 93;
+            case "\\":
+              return 92;
+            case "\xA3":
+              return 92;
+            case "\u2191":
+              return 30;
+            case "\u2190":
+              return 29;
+            case "\u2192":
+              return 31;
+            case "\u2193":
+              return 17;
+            default:
+              return code > 255 ? 63 : code;
+          }
+        }
+        tokenizeLine(sourceLine, lineNumber) {
+          const code = [];
+          let pos = 0;
+          let lastWasJump = 0;
+          let lastWasWhitespace = true;
+          while (pos < sourceLine.length && sourceLine[pos] === " ") {
+            pos++;
+          }
+          while (pos < sourceLine.length) {
+            const c = sourceLine[pos];
+            const currentChar = c;
+            if (c === " ") {
+              if (code.length > 0 && !lastWasWhitespace) {
+                code.push(32);
+              }
+              pos++;
+              lastWasWhitespace = true;
+              continue;
+            }
+            if (c === "	") {
+              pos++;
+              continue;
+            }
+            if (c === ":") {
+              lastWasJump = 0;
+              if (code.length > 0 && code[code.length - 1] !== 58) {
+                code.push(58);
+              }
+              pos++;
+              continue;
+            }
+            if (c === '"' || c === "'") {
+              const quoteChar = c;
+              code.push(34);
+              pos++;
+              while (pos < sourceLine.length && sourceLine[pos] !== quoteChar) {
+                if (sourceLine[pos] === "{") {
+                  pos++;
+                  let control = "";
+                  while (pos < sourceLine.length && sourceLine[pos] !== "}") {
+                    control += sourceLine[pos];
+                    pos++;
+                  }
+                  if (pos < sourceLine.length && sourceLine[pos] === "}") {
+                    pos++;
+                  }
+                  const controlCode = this.parseControlCode(control);
+                  if (controlCode !== null) {
+                    code.push(controlCode);
+                  }
+                } else {
+                  const charCode2 = this.petsciiToByte(sourceLine[pos]);
+                  code.push(charCode2);
+                  pos++;
+                }
+              }
+              if (pos < sourceLine.length && sourceLine[pos] === quoteChar) {
+                code.push(34);
+                pos++;
+              }
+              continue;
+            }
+            let token = null;
+            let tokenId = null;
+            let tokenLen = 0;
+            if (c === "?") {
+              token = "PRINT";
+              tokenId = 153;
+              tokenLen = 1;
+            } else {
+              for (const tokenStr of this.sortedTokens) {
+                if (sourceLine.substring(pos).toUpperCase().startsWith(tokenStr)) {
+                  token = tokenStr;
+                  tokenId = this.tokens[tokenStr];
+                  tokenLen = tokenStr.length;
+                  break;
+                }
+              }
+            }
+            if (token) {
+              if (tokenId !== void 0) {
+                code.push(tokenId);
+              }
+              if (tokenId === 137 || tokenId === 141 || tokenId === 203 || tokenId === 167) {
+                lastWasJump = tokenId;
+              }
+              pos += tokenLen;
+              lastWasWhitespace = false;
+              continue;
+            }
+            if (lastWasJump !== 0 && this.isLabelChar(c)) {
+              let label = "";
+              while (pos < sourceLine.length && this.isLabelChar(sourceLine[pos])) {
+                label += sourceLine[pos];
+                pos++;
+              }
+              for (const char of label) {
+                code.push(this.petsciiToByte(char));
+              }
+              continue;
+            }
+            if (lastWasJump !== 0 && this.isNumericChar(c)) {
+              let number = "";
+              while (pos < sourceLine.length && this.isNumericChar(sourceLine[pos])) {
+                number += sourceLine[pos];
+                pos++;
+              }
+              for (const char of number) {
+                code.push(this.petsciiToByte(char));
+              }
+              lastWasJump = 0;
+              lastWasWhitespace = false;
+              continue;
+            }
+            const charCode = this.petsciiToByte(c);
+            code.push(charCode);
+            pos++;
+            lastWasWhitespace = false;
+          }
+          while (code.length > 0 && code[code.length - 1] === 58) {
+            code.pop();
+          }
+          return {
+            lineNumber,
+            code: new Uint8Array(code),
+            sourceLine
+          };
+        }
+        parseControlCode(control) {
+          const controlMap = {
+            "CLR": 147,
+            "CLEAR": 147,
+            "HOME": 19,
+            "DEL": 20,
+            "DELETE": 20,
+            "INS": 148,
+            "INST": 148,
+            "INSERT": 148,
+            "RVS": 18,
+            "RVS ON": 18,
+            "RVS OFF": 146,
+            "REVERSE ON": 18,
+            "REVERSE OFF": 146,
+            "RVSON": 18,
+            "RVSOFF": 146,
+            "RETURN": 13,
+            "SHIFT RETURN": 141,
+            "SPACE": 32,
+            "PI": 255,
+            "LOWER": 14,
+            "UPPER": 142,
+            "DOWN": 17,
+            "UP": 145,
+            "LEFT": 157,
+            "RIGHT": 29,
+            "CURSOR DOWN": 17,
+            "CURSOR UP": 145,
+            "CURSOR LEFT": 157,
+            "CURSOR RIGHT": 29,
+            "CRSR DOWN": 17,
+            "CRSR UP": 145,
+            "CRSR LEFT": 157,
+            "CRSR RIGHT": 29,
+            "BLACK": 144,
+            "WHITE": 5,
+            "RED": 28,
+            "CYAN": 159,
+            "PURPLE": 156,
+            "GREEN": 30,
+            "BLUE": 31,
+            "YELLOW": 158,
+            "ORANGE": 129,
+            "BROWN": 149,
+            "PINK": 150,
+            "LIGHT-RED": 150,
+            "GRAY1": 151,
+            "DARK GREY": 151,
+            "DARKGREY": 151,
+            "DARK GRAY": 151,
+            "DARKGRAY": 151,
+            "GRAY2": 152,
+            "GREY": 152,
+            "GREY 1": 151,
+            "GREY1": 151,
+            "GREY 2": 152,
+            "GREY2": 152,
+            "LIGHTGREEN": 153,
+            "LIGHT BLUE": 154,
+            "LIGHTBLUE": 154,
+            "GRAY3": 155,
+            "LIGHTGREY": 155,
+            "LIGHT GRAY": 155,
+            "LIGHTGRAY": 155,
+            "GREY 3": 155,
+            "GREY3": 155,
+            "BLK": 144,
+            "WHT": 5,
+            "CYN": 159,
+            "PUR": 156,
+            "GRN": 30,
+            "BLU": 31,
+            "YEL": 158,
+            "F1": 133,
+            "F2": 137,
+            "F3": 134,
+            "F4": 138,
+            "F5": 135,
+            "F6": 139,
+            "F7": 136,
+            "F8": 140,
+            "LIG.RED": 150,
+            "LIG.GREEN": 153,
+            "LIG.BLUE": 154
+          };
+          const raw = control.trim();
+          if (raw.length > 0) {
+            let value = null;
+            const upper = raw.toUpperCase();
+            if (upper.startsWith("$")) {
+              const hex3 = upper.slice(1);
+              const parsed = parseInt(hex3, 16);
+              if (!Number.isNaN(parsed))
+                value = parsed & 255;
+            } else if (upper.startsWith("0X")) {
+              const hex3 = upper.slice(2);
+              const parsed = parseInt(hex3, 16);
+              if (!Number.isNaN(parsed))
+                value = parsed & 255;
+            } else if (upper.startsWith("%")) {
+              const bin = upper.slice(1);
+              const parsed = parseInt(bin, 2);
+              if (!Number.isNaN(parsed))
+                value = parsed & 255;
+            } else if (upper.startsWith("0B")) {
+              const bin = upper.slice(2);
+              const parsed = parseInt(bin, 2);
+              if (!Number.isNaN(parsed))
+                value = parsed & 255;
+            } else if (/^\d+$/.test(upper)) {
+              const parsed = parseInt(upper, 10);
+              if (!Number.isNaN(parsed))
+                value = parsed & 255;
+            }
+            if (value !== null)
+              return value;
+            const mapped = controlMap[upper];
+            if (mapped !== void 0)
+              return mapped;
+          }
+          return null;
+        }
+        isLabelChar(c) {
+          return c >= "A" && c <= "Z" || c >= "a" && c <= "z" || c === "_";
+        }
+        isNumericChar(c) {
+          return c >= "0" && c <= "9";
+        }
+        generatePrg(program) {
+          var _a;
+          const prg = [];
+          program.lines.sort((a, b) => a.lineNumber - b.lineNumber);
+          console.log(`\u{1F3AF} generatePrg: Generating PRG for ${program.lines.length} lines`);
+          console.log(`\u{1F3AF} generatePrg: Start address = 0x${program.startAddr.toString(16)}`);
+          prg.push(program.startAddr & 255);
+          prg.push(program.startAddr >> 8 & 255);
+          let currentAddr = program.startAddr;
+          console.log(`\u{1F3AF} generatePrg: First line structure will be at memory address 0x${currentAddr.toString(16)}`);
+          for (let i = 0; i < program.lines.length; i++) {
+            const line = program.lines[i];
+            const lineSize = 5 + line.code.length;
+            const nextAddr = i < program.lines.length - 1 ? currentAddr + lineSize : 0;
+            const codeBytes = Array.from(line.code).map((b) => "0x" + b.toString(16).padStart(2, "0")).join(" ");
+            console.log(`  Line ${i + 1}/${program.lines.length}: number=${line.lineNumber}, size=${lineSize}, currentAddr=0x${currentAddr.toString(16)}, nextAddr=0x${nextAddr.toString(16)}, code=[${codeBytes}]`);
+            if (i === 0) {
+              console.log(`  \u{1F3AF} First line structure: nextAddr=0x${nextAddr.toString(16)}, lineNum=${line.lineNumber}, code starts with 0x${((_a = line.code[0]) == null ? void 0 : _a.toString(16)) || "??"}`);
+            }
+            prg.push(nextAddr & 255);
+            prg.push(nextAddr >> 8 & 255);
+            prg.push(line.lineNumber & 255);
+            prg.push(line.lineNumber >> 8 & 255);
+            prg.push(...Array.from(line.code));
+            prg.push(0);
+            if (i < program.lines.length - 1) {
+              currentAddr = currentAddr + lineSize;
+            } else {
+              console.log(`  \u2705 Last line written: number=${line.lineNumber}, nextAddr=0x0000`);
+            }
+          }
+          prg.push(0);
+          prg.push(0);
+          console.log(`\u{1F3AF} generatePrg: PRG file generated, total size=${prg.length} bytes`);
+          return new Uint8Array(prg);
+        }
+        compile(source, startAddr) {
+          const lines = source.split(/\r?\n/);
+          const program = {
+            lines: [],
+            startAddr: startAddr !== void 0 ? startAddr : VIC20_BASIC_START_ADDR
+          };
+          console.log(`\u{1F3AF} Compiling BASIC source: ${lines.length} lines from split`);
+          console.log(`\u{1F3AF} All source lines (before processing):`);
+          lines.forEach((line, idx) => {
+            console.log(`  Source line ${idx + 1}: "${line.substring(0, 60).replace(/\n/g, "\\n").replace(/\r/g, "\\r")}"`);
+          });
+          const labels = {};
+          const processedLines = [];
+          const pendingLabels = [];
+          let lineNumber = 10;
+          for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+            const sourceLine = lines[lineIdx];
+            const trimmed = sourceLine.trim();
+            if (trimmed.length === 0) {
+              console.log(`  Skipping empty line ${lineIdx + 1}`);
+              continue;
+            }
+            console.log(`  Processing line ${lineIdx + 1}: "${trimmed.substring(0, 50)}"`);
+            const lineMatch = trimmed.match(/^(\d+)(\s*)(.+)$/);
+            if (lineMatch && lineMatch[3].trim().length > 0) {
+              const newLineNumber = parseInt(lineMatch[1]);
+              for (const pending of pendingLabels) {
+                labels[pending.label] = newLineNumber;
+                const remCode = "REM " + pending.label;
+                processedLines.push({ lineNumber: newLineNumber, code: remCode, sourceLine: `REM ${pending.label}` });
+                console.log(`\u{1F3AF} Creating REM line for pending label "${pending.label}" at line ${newLineNumber}`);
+              }
+              pendingLabels.length = 0;
+              lineNumber = newLineNumber;
+              let code = lineMatch[3].trim();
+              const lineNumberStr = newLineNumber.toString();
+              if (code.startsWith(lineNumberStr) && code.length > lineNumberStr.length) {
+                const nextChar = code[lineNumberStr.length];
+                if (!/\d/.test(nextChar)) {
+                  code = code.substring(lineNumberStr.length);
+                  console.log(`\u{1F3AF} Stripped leading line number digits from code: "${lineMatch[3]}" -> "${code}"`);
+                }
+              }
+              const standaloneLabelMatch = code.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*$/);
+              if (standaloneLabelMatch) {
+                const label = standaloneLabelMatch[1].toLowerCase();
+                labels[label] = lineNumber;
+                const remCode = "REM " + standaloneLabelMatch[1];
+                console.log(`\u{1F3AF} Converting standalone label at line ${lineNumber}: "${code}" -> "${remCode}"`);
+                processedLines.push({ lineNumber, code: remCode, sourceLine: trimmed });
+                lineNumber = Math.ceil((lineNumber + 1) / 10) * 10;
+                continue;
+              }
+              const codeLabelMatch = code.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.+)$/);
+              if (codeLabelMatch) {
+                const label = codeLabelMatch[1].toLowerCase();
+                const actualCode = codeLabelMatch[2];
+                labels[label] = lineNumber;
+                processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed });
+              } else {
+                processedLines.push({ lineNumber, code, sourceLine: trimmed });
+              }
+              lineNumber = Math.ceil((lineNumber + 1) / 10) * 10;
+            } else {
+              const standaloneLabelMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*$/);
+              if (standaloneLabelMatch) {
+                const label = standaloneLabelMatch[1].toLowerCase();
+                labels[label] = lineNumber;
+                const remCode = "REM " + standaloneLabelMatch[1];
+                console.log(`\u{1F3AF} Converting standalone label (no line number): "${trimmed}" -> "${remCode}" at line ${lineNumber}`);
+                processedLines.push({ lineNumber, code: remCode, sourceLine: trimmed });
+                lineNumber += 10;
+              } else {
+                const codeLabelMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.+)$/);
+                if (codeLabelMatch) {
+                  const label = codeLabelMatch[1].toLowerCase();
+                  const actualCode = codeLabelMatch[2];
+                  labels[label] = lineNumber;
+                  processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed });
+                } else {
+                  processedLines.push({ lineNumber, code: trimmed, sourceLine: trimmed });
+                }
+                lineNumber += 10;
+              }
+            }
+          }
+          console.log(`\u{1F3AF} First pass complete: ${processedLines.length} lines processed`);
+          processedLines.forEach((line, idx) => {
+            console.log(`  Line ${idx}: number=${line.lineNumber}, code="${line.code.substring(0, 40)}"`);
+          });
+          processedLines.sort((a, b) => a.lineNumber - b.lineNumber);
+          const seenLineNumbers = new Map();
+          for (const line of processedLines) {
+            const existing = seenLineNumbers.get(line.lineNumber);
+            if (!existing) {
+              seenLineNumbers.set(line.lineNumber, line);
+            } else {
+              const isRem = line.code.trim().toUpperCase().startsWith("REM");
+              const existingIsRem = existing.code.trim().toUpperCase().startsWith("REM");
+              if (isRem && !existingIsRem) {
+                let remLineNumber = line.lineNumber - 1;
+                if (remLineNumber < 0)
+                  remLineNumber = 0;
+                while (seenLineNumbers.has(remLineNumber) && remLineNumber >= 0) {
+                  remLineNumber -= 1;
+                  if (remLineNumber < 0) {
+                    remLineNumber = 0;
+                    break;
+                  }
+                }
+                if (remLineNumber < line.lineNumber && remLineNumber >= 0) {
+                  seenLineNumbers.set(remLineNumber, __spreadProps(__spreadValues({}, line), { lineNumber: remLineNumber }));
+                  console.log(`\u{1F3AF} Keeping REM label by moving it to line ${remLineNumber} (was ${line.lineNumber}, conflicts with actual code)`);
+                } else {
+                  let nextLineNumber = line.lineNumber + 1;
+                  while (seenLineNumbers.has(nextLineNumber)) {
+                    nextLineNumber += 1;
+                  }
+                  seenLineNumbers.set(nextLineNumber, __spreadProps(__spreadValues({}, line), { lineNumber: nextLineNumber }));
+                  console.log(`\u{1F3AF} Keeping REM label by moving it to line ${nextLineNumber} (was ${line.lineNumber}, couldn't fit before)`);
+                }
+              } else if (!isRem && existingIsRem) {
+                let nextLineNumber = line.lineNumber + 1;
+                while (seenLineNumbers.has(nextLineNumber)) {
+                  nextLineNumber += 1;
+                }
+                seenLineNumbers.set(nextLineNumber, __spreadProps(__spreadValues({}, line), { lineNumber: nextLineNumber }));
+                console.log(`\u{1F3AF} Keeping REM label at ${line.lineNumber}, moving actual code to line ${nextLineNumber}`);
+              } else {
+                console.log(`\u26A0\uFE0F Removing duplicate line number ${line.lineNumber}: "${existing.code.substring(0, 40)}"`);
+                seenLineNumbers.set(line.lineNumber, line);
+              }
+            }
+          }
+          const uniqueLines = Array.from(seenLineNumbers.values()).sort((a, b) => a.lineNumber - b.lineNumber);
+          console.log(`\u{1F3AF} After duplicate removal: ${uniqueLines.length} unique lines`);
+          uniqueLines.forEach((line, idx) => {
+            console.log(`  Unique line ${idx}: number=${line.lineNumber}, code="${line.code.substring(0, 40)}"`);
+          });
+          if (uniqueLines.length > 0) {
+            const lastLineNumber = uniqueLines[uniqueLines.length - 1].lineNumber;
+            const dummyLineNumber = lastLineNumber + 10;
+            uniqueLines.push({
+              lineNumber: dummyLineNumber,
+              code: "REM",
+              sourceLine: "REM"
+            });
+            console.log(`\u{1F3AF} Added dummy REM line at ${dummyLineNumber} before tokenization`);
+          }
+          for (const line of uniqueLines) {
+            const tokenizedLine = this.tokenizeLineWithLabels(line.code, line.lineNumber, labels);
+            program.lines.push(tokenizedLine);
+          }
+          console.log(`\u{1F3AF} Final program: ${program.lines.length} tokenized lines`);
+          return this.generatePrg(program);
+        }
+        tokenizeLineWithLabels(sourceLine, lineNumber, labels) {
+          const code = [];
+          let pos = 0;
+          let lastWasJump = 0;
+          let lastWasWhitespace = true;
+          while (pos < sourceLine.length && sourceLine[pos] === " ") {
+            pos++;
+          }
+          while (pos < sourceLine.length) {
+            const c = sourceLine[pos];
+            if (c === " ") {
+              if (lastWasJump !== 0) {
+                let nextIsKeyword = false;
+                if (lastWasJump === 167) {
+                  const remaining = sourceLine.substring(pos + 1).trimStart();
+                  for (const tokenStr of this.sortedTokens) {
+                    if (remaining.toUpperCase().startsWith(tokenStr)) {
+                      nextIsKeyword = true;
+                      break;
+                    }
+                  }
+                }
+                if (!nextIsKeyword) {
+                  pos++;
+                  lastWasWhitespace = true;
+                  continue;
+                }
+              }
+              if (code.length > 0 && !lastWasWhitespace) {
+                code.push(32);
+              }
+              pos++;
+              lastWasWhitespace = true;
+              continue;
+            }
+            if (c === "	") {
+              pos++;
+              continue;
+            }
+            if (c === ":") {
+              lastWasJump = 0;
+              if (code.length > 0 && code[code.length - 1] !== 58) {
+                code.push(58);
+              }
+              pos++;
+              continue;
+            }
+            if (c === '"' || c === "'") {
+              const quoteChar = c;
+              code.push(34);
+              pos++;
+              while (pos < sourceLine.length && sourceLine[pos] !== quoteChar) {
+                if (sourceLine[pos] === "{") {
+                  pos++;
+                  let control = "";
+                  while (pos < sourceLine.length && sourceLine[pos] !== "}") {
+                    control += sourceLine[pos];
+                    pos++;
+                  }
+                  if (pos < sourceLine.length && sourceLine[pos] === "}") {
+                    pos++;
+                  }
+                  const controlCode = this.parseControlCode(control);
+                  if (controlCode !== null) {
+                    code.push(controlCode);
+                  }
+                } else {
+                  const charCode2 = this.petsciiToByte(sourceLine[pos]);
+                  code.push(charCode2);
+                  pos++;
+                }
+              }
+              if (pos < sourceLine.length && sourceLine[pos] === quoteChar) {
+                code.push(34);
+                pos++;
+              }
+              continue;
+            }
+            let token = null;
+            let tokenId = null;
+            let tokenLen = 0;
+            if (c === "?") {
+              token = "PRINT";
+              tokenId = 153;
+              tokenLen = 1;
+            } else {
+              for (const tokenStr of this.sortedTokens) {
+                if (sourceLine.substring(pos).toUpperCase().startsWith(tokenStr)) {
+                  token = tokenStr;
+                  tokenId = this.tokens[tokenStr];
+                  tokenLen = tokenStr.length;
+                  break;
+                }
+              }
+            }
+            if (token) {
+              if (tokenId !== void 0) {
+                code.push(tokenId);
+              }
+              if (tokenId === 137 || tokenId === 141 || tokenId === 203 || tokenId === 167) {
+                lastWasJump = tokenId;
+              } else {
+                if (lastWasJump !== 167) {
+                  lastWasJump = 0;
+                }
+              }
+              pos += tokenLen;
+              lastWasWhitespace = false;
+              continue;
+            }
+            if (lastWasJump !== 0 && this.isLabelChar(c)) {
+              let label = "";
+              let labelPos = pos;
+              while (labelPos < sourceLine.length && (this.isLabelChar(sourceLine[labelPos]) || this.isNumericChar(sourceLine[labelPos]))) {
+                label += sourceLine[labelPos];
+                labelPos++;
+              }
+              const labelLower = label.toLowerCase();
+              const resolvedLineNumber = labels[labelLower];
+              console.log(`\u{1F3AF} Label lookup: "${label}" (lowercase: "${labelLower}") after jump token ${lastWasJump.toString(16)}, found: ${resolvedLineNumber !== void 0 ? resolvedLineNumber : "NOT FOUND"}`);
+              console.log(`\u{1F3AF} Available labels:`, Object.keys(labels));
+              if (resolvedLineNumber !== void 0) {
+                const lineNumberStr = resolvedLineNumber.toString();
+                console.log(`\u2705 Resolving label "${label}" to line number ${resolvedLineNumber}`);
+                for (const char of lineNumberStr) {
+                  code.push(this.petsciiToByte(char));
+                }
+                pos = labelPos;
+                lastWasJump = 0;
+                lastWasWhitespace = false;
+                continue;
+              } else {
+                console.log(`\u26A0\uFE0F Label "${label}" not found in labels dictionary`);
+                for (const char of label) {
+                  code.push(this.petsciiToByte(char));
+                }
+                pos = labelPos;
+                lastWasJump = 0;
+                lastWasWhitespace = false;
+                continue;
+              }
+            }
+            if (lastWasJump !== 0 && this.isNumericChar(c)) {
+              let number = "";
+              while (pos < sourceLine.length && this.isNumericChar(sourceLine[pos])) {
+                number += sourceLine[pos];
+                pos++;
+              }
+              for (const char of number) {
+                code.push(this.petsciiToByte(char));
+              }
+              lastWasJump = 0;
+              lastWasWhitespace = false;
+              continue;
+            }
+            const charCode = this.petsciiToByte(c);
+            code.push(charCode);
+            pos++;
+            lastWasWhitespace = false;
+          }
+          while (code.length > 0 && code[code.length - 1] === 58) {
+            code.pop();
+          }
+          return {
+            lineNumber,
+            code: new Uint8Array(code),
+            sourceLine
+          };
+        }
+      };
+    }
+  });
+
   // src/worker/tools/c64basic.ts
   function compileC64Basic(step) {
     const outputPath = step.prefix + ".prg";
@@ -16196,8 +16860,14 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
     if (staleFiles(step, [outputPath])) {
       try {
         const source = getWorkFileAsString(step.path);
-        const tokenizer2 = new C64BasicTokenizer();
-        const prgData = tokenizer2.compile(source);
+        let prgData;
+        if (step.platform === "vic20") {
+          const tokenizer2 = new VIC20BasicTokenizer();
+          prgData = tokenizer2.compile(source);
+        } else {
+          const tokenizer2 = new C64BasicTokenizer();
+          prgData = tokenizer2.compile(source);
+        }
         putWorkFile(outputPath, prgData);
         return {
           output: prgData,
@@ -16218,6 +16888,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
   var init_c64basic = __esm({
     "src/worker/tools/c64basic.ts"() {
       init_c64tokenizer();
+      init_vic20tokenizer();
       init_builder();
     }
   });

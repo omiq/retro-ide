@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.C64_BASIC_START_ADDR = exports.C64_TOKENS = exports.DIALECTS = exports.MODERN_BASIC = exports.BASIC80 = exports.APPLESOFT_BASIC = exports.ALTAIR_BASIC41 = exports.BASICODE = exports.DEC_BASIC_PLUS = exports.DEC_BASIC_11 = exports.HP_TIMESHARED_BASIC = exports.TINY_BASIC = exports.DARTMOUTH_4TH_EDITION = exports.ECMA55_MINIMAL = exports.BASICParser = exports.TokenType = exports.CompileError = void 0;
+exports.VIC20_BASIC_START_ADDR = exports.C64_BASIC_START_ADDR = exports.C64_TOKENS = exports.DIALECTS = exports.MODERN_BASIC = exports.BASIC80 = exports.APPLESOFT_BASIC = exports.ALTAIR_BASIC41 = exports.BASICODE = exports.DEC_BASIC_PLUS = exports.DEC_BASIC_11 = exports.HP_TIMESHARED_BASIC = exports.TINY_BASIC = exports.DARTMOUTH_4TH_EDITION = exports.ECMA55_MINIMAL = exports.BASICParser = exports.TokenType = exports.CompileError = void 0;
 class CompileError extends Error {
     constructor(msg, loc) {
         super(msg);
@@ -1943,4 +1943,6 @@ exports.C64_TOKENS = {
 };
 // C64 BASIC start address
 exports.C64_BASIC_START_ADDR = 0x0801;
+// VIC-20 BASIC start address (unexpanded)
+exports.VIC20_BASIC_START_ADDR = 0x1001;
 //# sourceMappingURL=compiler.js.map

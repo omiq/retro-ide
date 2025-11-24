@@ -2162,3 +2162,6 @@ export const C64_TOKENS = {
 
 // C64 BASIC start address
 export const C64_BASIC_START_ADDR = 0x0801;
+
+// VIC-20 BASIC start address (unexpanded)
+export const VIC20_BASIC_START_ADDR = 0x1001;

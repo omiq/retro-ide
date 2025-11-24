@@ -4,6 +4,10 @@ import { PLATFORMS } from "../common/emu";
 import { RasterVideo, AnimationTimer } from "../common/emu";
 
 const VIC20_PRESETS : Preset[] = [
+  {id:'hello.bas', name:'Hello World (BASIC)', category:'BASIC Tutorial'},
+  {id:'control.bas', name:'Control Codes Demo (BASIC)'},
+  {id:'labels.bas', name:'Label Demo (BASIC)'},
+  {id:'guess.bas', name:'Number Guessing (BASIC)'},
   {id:'hello.c', name:'Hello World', category:'C'},
   {id:'siegegame.c', name:'Siege Game'},
   {id:'skeleton.cc65', name:'C/CC65 Boilerplate'},
@@ -92,35 +96,93 @@ class VIC20ChipsPlatform implements Platform {
     
     var frame = document.getElementById("vic20-iframe") as HTMLIFrameElement;
     if (frame && frame.contentWindow) {
-      const vic20_debug = (window as any).vic20_debug;
-      if (vic20_debug && vic20_debug.openIframeWithCurrentProgram) {
-        // Debug: Log the URL being generated
-        const iframeURL = vic20_debug.openIframeWithCurrentProgram();
-        console.log("VIC20ChipsPlatform: Generated iframe URL:", iframeURL);
+      // For BASIC programs, the tokenized PRG is already compiled and passed as 'rom'
+      // VIC-20 uses the same Commodore BASIC V2 as C64, so we can load the tokenized PRG directly
+      // No special handling needed - just load it like any other program
+      
+      // For non-BASIC programs or if we couldn't get the source, use the regular method
+      // Instead of using URL parameters for large programs, use postMessage
+      if (rom.length > 1000) { // If program is larger than 1KB, use postMessage
+        console.log("VIC20ChipsPlatform: Large program detected, using postMessage instead of URL");
         
-        if (iframeURL) {
-          // Add cache busting to ensure we get the latest version
-          const cacheBuster = '&t=' + Date.now();
-          const freshURL = iframeURL + cacheBuster;
-          console.log("VIC20ChipsPlatform: Loading fresh URL with cache buster:", freshURL);
-          
-          // Set up a one-time load event listener
-          const onLoad = () => {
-            console.log("VIC20ChipsPlatform: iframe loaded, calling checkForProgramInURL");
-            if ((frame.contentWindow as any).checkForProgramInURL) {
-              (frame.contentWindow as any).checkForProgramInURL();
-            }
-            frame.removeEventListener('load', onLoad);
-          };
-          frame.addEventListener('load', onLoad);
-          
-          // Set the location (this triggers the load event)
-          frame.contentWindow.location = freshURL;
-        } else {
-          console.error("VIC20ChipsPlatform: openIframeWithCurrentProgram returned null");
-        }
+        // Load the iframe with just the base URL
+        const baseURL = 'vic20-iframe.html?t=' + Date.now();
+        frame.src = baseURL;
+        
+        // Set up a one-time load event listener
+        const onLoad = () => {
+          console.log("VIC20ChipsPlatform: iframe loaded, sending program via postMessage");
+          // Send the program data via postMessage
+          frame.contentWindow!.postMessage({
+            type: 'compiled_program',
+            program: rom,
+            autoLoad: true
+          }, '*');
+          frame.removeEventListener('load', onLoad);
+        };
+        frame.addEventListener('load', onLoad);
       } else {
-        console.error("VIC20ChipsPlatform: vic20_debug not available");
+        // For small programs, use URL parameters
+        const vic20_debug = (window as any).vic20_debug;
+        if (vic20_debug && vic20_debug.generateIframeURL) {
+          // Handle async generateIframeURL (like C64 does)
+          const urlResult = vic20_debug.generateIframeURL(rom);
+          if (urlResult instanceof Promise) {
+            urlResult.then((iframeURL: string) => {
+              console.log("VIC20ChipsPlatform: Generated iframe URL:", iframeURL);
+              
+              if (iframeURL) {
+                const cacheBuster = '&t=' + Date.now();
+                const freshURL = iframeURL + cacheBuster;
+                console.log("VIC20ChipsPlatform: Loading fresh URL with cache buster:", freshURL);
+                
+                // Set up a one-time load event listener
+                const onLoad = () => {
+                  console.log("VIC20ChipsPlatform: iframe loaded, calling checkForProgramInURL");
+                  if ((frame.contentWindow as any).checkForProgramInURL) {
+                    (frame.contentWindow as any).checkForProgramInURL();
+                  }
+                  frame.removeEventListener('load', onLoad);
+                };
+                frame.addEventListener('load', onLoad);
+                
+                // Set the location (this triggers the load event)
+                frame.contentWindow.location = freshURL;
+              } else {
+                console.error("VIC20ChipsPlatform: generateIframeURL returned null");
+              }
+            }).catch((error: any) => {
+              console.error("VIC20ChipsPlatform: Error generating iframe URL:", error);
+            });
+          } else {
+            // Synchronous version
+            const iframeURL = urlResult as string;
+            console.log("VIC20ChipsPlatform: Generated iframe URL:", iframeURL);
+            
+            if (iframeURL) {
+              const cacheBuster = '&t=' + Date.now();
+              const freshURL = iframeURL + cacheBuster;
+              console.log("VIC20ChipsPlatform: Loading fresh URL with cache buster:", freshURL);
+              
+              // Set up a one-time load event listener
+              const onLoad = () => {
+                console.log("VIC20ChipsPlatform: iframe loaded, calling checkForProgramInURL");
+                if ((frame.contentWindow as any).checkForProgramInURL) {
+                  (frame.contentWindow as any).checkForProgramInURL();
+                }
+                frame.removeEventListener('load', onLoad);
+              };
+              frame.addEventListener('load', onLoad);
+              
+              // Set the location (this triggers the load event)
+              frame.contentWindow.location = freshURL;
+            } else {
+              console.error("VIC20ChipsPlatform: generateIframeURL returned null");
+            }
+          }
+        } else {
+          console.error("VIC20ChipsPlatform: vic20_debug.generateIframeURL not available");
+        }
       }
     } else {
       console.error("VIC20ChipsPlatform: iframe not found or contentWindow not available");
@@ -318,6 +380,7 @@ class VIC20ChipsPlatform implements Platform {
   }
 
   getToolForFilename(filename: string): string {
+    if (filename.toLowerCase().endsWith(".bas")) return "c64basic";
     if (filename.endsWith(".c")) return "cc65";
     if (filename.endsWith(".dasm")) return "dasm";
     if (filename.endsWith(".acme")) return "acme";
