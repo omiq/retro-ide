@@ -82,11 +82,31 @@ class VIC20ChipsPlatform implements Platform {
   }
 
   pause(): void {
+    console.log("VIC20ChipsPlatform pause() called");
+    
+    // Send pause command to iframe emulator
+    const frame = document.getElementById("vic20-iframe") as HTMLIFrameElement;
+    if (frame && frame.contentWindow) {
+      frame.contentWindow.postMessage({ type: 'pause' }, '*');
+      console.log("VIC20ChipsPlatform: Sent pause command to iframe");
+    }
+    
+    // Also pause the local machine for consistency
     this.running = false;
     if (this.timer) this.timer.stop();
   }
 
   resume(): void {
+    console.log("VIC20ChipsPlatform resume() called");
+    
+    // Send resume command to iframe emulator
+    const frame = document.getElementById("vic20-iframe") as HTMLIFrameElement;
+    if (frame && frame.contentWindow) {
+      frame.contentWindow.postMessage({ type: 'resume' }, '*');
+      console.log("VIC20ChipsPlatform: Sent resume command to iframe");
+    }
+    
+    // Also resume the local machine for consistency
     this.running = true;
     if (this.timer) this.timer.start();
   }
@@ -347,7 +367,19 @@ class VIC20ChipsPlatform implements Platform {
   }
 
   reset(): void {
-    this.machine.reset();
+    console.log("VIC20ChipsPlatform reset() called");
+    
+    // Send reset command to iframe emulator
+    const frame = document.getElementById("vic20-iframe") as HTMLIFrameElement;
+    if (frame && frame.contentWindow) {
+      frame.contentWindow.postMessage({ type: 'reset' }, '*');
+      console.log("VIC20ChipsPlatform: Sent reset command to iframe");
+    }
+    
+    // Also reset the local machine for consistency
+    if (this.machine) {
+      this.machine.reset();
+    }
   }
 
   setKeyInput(key: number, code: number, flags: number): void {
