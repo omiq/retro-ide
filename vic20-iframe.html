@@ -217,7 +217,8 @@
                 window.Module.locateFile = function(path, prefix) {
                     if (path.endsWith('.wasm')) {
                         // The emscripten module expects 'emscripten_module.wasm'
-                        return 'res/emscripten_module.wasm';
+                        // Use absolute path to ensure it works regardless of iframe location
+                        return '/res/emscripten_module.wasm';
                     }
                     return (prefix || '') + path;
                 };
@@ -272,24 +273,26 @@
                 }
                 
                 // Load the emscripten module script
+                // Use relative path (same as C64 iframe) to match server structure
                 const moduleScript = document.createElement('script');
                 moduleScript.src = 'res/vic20-emu.js';
                 
                 await new Promise((resolve, reject) => {
                     moduleScript.onload = resolve;
-                    moduleScript.onerror = () => reject(new Error("Failed to load emscripten_module.js"));
+                    moduleScript.onerror = () => reject(new Error("Failed to load res/vic20-emu.js"));
                     document.head.appendChild(moduleScript);
                 });
                 
                 updateStatus("VIC-20 module script loaded");
                 
                 // Load the wrapper script which sets up the vic20 object
+                // Use relative path (same as C64 iframe) to match server structure
                 const wrapperScript = document.createElement('script');
                 wrapperScript.src = 'res/vic20-emu-wrapper.js';
                 
                 await new Promise((resolve, reject) => {
                     wrapperScript.onload = resolve;
-                    wrapperScript.onerror = () => reject(new Error("Failed to load emscripten_wrapper.js"));
+                    wrapperScript.onerror = () => reject(new Error("Failed to load res/vic20-emu-wrapper.js"));
                     document.head.appendChild(wrapperScript);
                 });
                 
