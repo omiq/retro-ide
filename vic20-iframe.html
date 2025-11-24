@@ -332,10 +332,10 @@
                         // Set up main emulation loop (similar to fork's oneFrame function)
                         // Limit execution to ~16ms per frame (60fps) to prevent browser freezing
                         let lastTimestamp = performance.now();
-                        let animationFrameId: number | null = null;
+                        let animationFrameId = null;
                         let isPaused = false;
                         
-                        function oneFrame(timestamp: number) {
+                        function oneFrame(timestamp) {
                             if (isPaused) {
                                 // Don't update timestamp when paused, so we don't accumulate time
                                 animationFrameId = requestAnimationFrame(oneFrame);
@@ -356,7 +356,7 @@
                         animationFrameId = requestAnimationFrame(oneFrame);
                         
                         // Store pause/resume functions globally for message handlers
-                        (window as any).pauseEmulation = function() {
+                        window.pauseEmulation = function() {
                             if (!isPaused) {
                                 isPaused = true;
                                 updateStatus("VIC-20 emulator paused");
@@ -364,7 +364,7 @@
                             }
                         };
                         
-                        (window as any).resumeEmulation = function() {
+                        window.resumeEmulation = function() {
                             if (isPaused) {
                                 isPaused = false;
                                 lastTimestamp = performance.now(); // Reset timestamp on resume
@@ -631,24 +631,12 @@
                 if (emulatorReady) {
                     loadProgramIntoEmulator(event.data.program);
                 }
-            } else if (event.data && event.data.type === 'reset') {
-                console.log("VIC-20 iframe: Received reset command");
-                updateStatus("Resetting VIC-20 emulator...");
-                
-                if (window.vic20 && typeof window.vic20.reset === 'function') {
-                    window.vic20.reset();
-                    updateStatus("VIC-20 emulator reset");
-                    console.log("VIC-20 iframe: Emulator reset successfully");
-                } else {
-                    console.error("VIC-20 iframe: vic20.reset() not available");
-                    updateStatus("Error: Reset not available");
-                }
             } else if (event.data && event.data.type === 'pause') {
                 console.log("VIC-20 iframe: Received pause command");
                 updateStatus("Pausing VIC-20 emulator...");
                 
-                if (typeof (window as any).pauseEmulation === 'function') {
-                    (window as any).pauseEmulation();
+                if (typeof window.pauseEmulation === 'function') {
+                    window.pauseEmulation();
                 } else {
                     console.log("VIC-20 iframe: Pause function not available");
                     updateStatus("Pause not available");
@@ -657,8 +645,8 @@
                 console.log("VIC-20 iframe: Received resume command");
                 updateStatus("Resuming VIC-20 emulator...");
                 
-                if (typeof (window as any).resumeEmulation === 'function') {
-                    (window as any).resumeEmulation();
+                if (typeof window.resumeEmulation === 'function') {
+                    window.resumeEmulation();
                 } else {
                     console.log("VIC-20 iframe: Resume function not available");
                     updateStatus("Resume not available");

@@ -31,6 +31,7 @@ class VIC20ChipsPlatform implements Platform {
   private mainElement: HTMLElement;
   private running = false;
   private timer: AnimationTimer | null = null;
+  private lastLoadedProgram: { title: string; rom: Uint8Array } | null = null;
 
   constructor(mainElement: HTMLElement) {
     this.mainElement = mainElement;
@@ -55,6 +56,9 @@ class VIC20ChipsPlatform implements Platform {
     
     // Set up a listener for compilation events to reload the iframe
     this.setupCompilationListener();
+    
+    // Show control buttons (reset, pause, resume)
+    this.updateControlButtons();
   }
 
   private setupCompilationListener(): void {
@@ -113,6 +117,9 @@ class VIC20ChipsPlatform implements Platform {
 
   loadROM(title: string, rom: Uint8Array): void {
     console.log("VIC20ChipsPlatform loadROM called with title:", title, "and", rom.length, "bytes");
+    
+    // Store the program for reload after reset
+    this.lastLoadedProgram = { title, rom };
     
     var frame = document.getElementById("vic20-iframe") as HTMLIFrameElement;
     if (frame && frame.contentWindow) {
@@ -369,16 +376,77 @@ class VIC20ChipsPlatform implements Platform {
   reset(): void {
     console.log("VIC20ChipsPlatform reset() called");
     
-    // Send reset command to iframe emulator
+    // Simply reload the iframe - much simpler and gives a fresh state
     const frame = document.getElementById("vic20-iframe") as HTMLIFrameElement;
-    if (frame && frame.contentWindow) {
-      frame.contentWindow.postMessage({ type: 'reset' }, '*');
-      console.log("VIC20ChipsPlatform: Sent reset command to iframe");
+    if (frame) {
+      // Reload the iframe with a cache buster to force a fresh load
+      // If the program was loaded via URL, it will automatically reload
+      // If it was loaded via postMessage, we'll need to handle that in the iframe
+      const currentSrc = frame.src.split('?')[0]; // Get base URL without params
+      const cacheBuster = '?t=' + Date.now();
+      
+      // If we have a last loaded program and it's small enough for URL, regenerate URL
+      if (this.lastLoadedProgram && this.lastLoadedProgram.rom.length <= 1000) {
+        const vic20_debug = (window as any).vic20_debug;
+        if (vic20_debug && vic20_debug.generateIframeURL) {
+          const urlResult = vic20_debug.generateIframeURL(this.lastLoadedProgram.rom);
+          if (urlResult instanceof Promise) {
+            urlResult.then((iframeURL: string) => {
+              if (iframeURL) {
+                frame.src = iframeURL + '&t=' + Date.now();
+                console.log("VIC20ChipsPlatform: Reloaded iframe with program URL");
+              } else {
+                frame.src = currentSrc + cacheBuster;
+                console.log("VIC20ChipsPlatform: Reloaded iframe (fallback)");
+              }
+            });
+          } else {
+            const iframeURL = urlResult as string;
+            if (iframeURL) {
+              frame.src = iframeURL + '&t=' + Date.now();
+              console.log("VIC20ChipsPlatform: Reloaded iframe with program URL");
+            } else {
+              frame.src = currentSrc + cacheBuster;
+              console.log("VIC20ChipsPlatform: Reloaded iframe (fallback)");
+            }
+          }
+        } else {
+          // Fallback: just reload current src
+          frame.src = frame.src + (frame.src.includes('?') ? '&' : '?') + 't=' + Date.now();
+          console.log("VIC20ChipsPlatform: Reloaded iframe (fallback - no generateIframeURL)");
+        }
+      } else {
+        // Large program or no program - just reload with cache buster
+        frame.src = frame.src + (frame.src.includes('?') ? '&' : '?') + 't=' + Date.now();
+        console.log("VIC20ChipsPlatform: Reloaded iframe");
+      }
     }
     
     // Also reset the local machine for consistency
     if (this.machine) {
       this.machine.reset();
+    }
+  }
+
+  private updateControlButtons(): void {
+    // VIC-20 supports reset, pause, and resume
+    const resetButton = document.getElementById('dbg_reset') as HTMLElement;
+    const pauseButton = document.getElementById('dbg_pause') as HTMLElement;
+    const resumeButton = document.getElementById('dbg_go') as HTMLElement;
+    
+    if (resetButton) {
+      resetButton.style.display = 'inline-block';
+      console.log("VIC20ChipsPlatform: Reset button visible");
+    }
+    
+    if (pauseButton) {
+      pauseButton.style.display = 'inline-block';
+      console.log("VIC20ChipsPlatform: Pause button visible");
+    }
+    
+    if (resumeButton) {
+      resumeButton.style.display = 'inline-block';
+      console.log("VIC20ChipsPlatform: Resume button visible");
     }
   }
 
