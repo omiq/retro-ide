@@ -217,8 +217,8 @@
                 window.Module.locateFile = function(path, prefix) {
                     if (path.endsWith('.wasm')) {
                         // The emscripten module expects 'emscripten_module.wasm'
-                        // Use absolute path to ensure it works regardless of iframe location
-                        return '/res/emscripten_module.wasm';
+                        // Use relative path (same as C64 iframe) to match server structure
+                        return 'res/emscripten_module.wasm';
                     }
                     return (prefix || '') + path;
                 };
