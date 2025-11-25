@@ -214,20 +214,46 @@
                     console.log("✅ Program loaded via vic20.load_prg()");
                     updateStatus("Program loaded: " + programData.length + " bytes");
                     
-                    // Verify program was loaded by checking BASIC start pointer (address 43-44)
+                    // Verify and fix BASIC pointers if needed (address 43-44 for start, 45-46 for end)
                     // Address 43-44 contains the start of BASIC program (low byte, high byte)
-                    // Should be 0x1001 (4097) for a valid program
+                    // With unexpanded: 0x1001, with +8K expansion: 0x1201
                     setTimeout(() => {
-                        if (window.vic20 && window.vic20.peek) {
+                        if (window.vic20 && window.vic20.peek && window.vic20.poke && programData.length >= 2) {
+                            const loadAddress = (programData[1] << 8) | programData[0];
+                            const programLength = programData.length - 2; // Exclude PRG header
+                            const programEnd = loadAddress + programLength;
+                            
                             const basicStartLow = window.vic20.peek(43);
                             const basicStartHigh = window.vic20.peek(44);
                             const basicStart = basicStartLow + (basicStartHigh * 256);
-                            console.log("🎯 BASIC start pointer:", "0x" + basicStart.toString(16), "(" + basicStart + ")");
                             
-                            if (basicStart === 0x1001 || basicStart > 0x1000) {
+                            console.log("🎯 Program load address:", "0x" + loadAddress.toString(16));
+                            console.log("🎯 Program end address:", "0x" + programEnd.toString(16));
+                            console.log("🎯 BASIC start pointer (before fix):", "0x" + basicStart.toString(16), "(" + basicStart + ")");
+                            
+                            // Check if this looks like a BASIC program (starts with a line structure)
+                            // BASIC programs have: [next_line_low, next_line_high, line_num_low, line_num_high, ...]
+                            const isBasicProgram = programLength >= 4 && 
+                                loadAddress >= 0x1001 && loadAddress <= 0x1FFF; // Valid BASIC memory range
+                            
+                            // If BASIC start pointer is 0 or doesn't match load address, fix it
+                            if (isBasicProgram && (basicStart === 0 || basicStart !== loadAddress)) {
+                                console.log("🔧 Fixing BASIC pointers...");
+                                // Set BASIC start pointer (address 43-44)
+                                window.vic20.poke(43, loadAddress & 0xFF);
+                                window.vic20.poke(44, (loadAddress >> 8) & 0xFF);
+                                // Set BASIC end pointer (address 45-46)
+                                window.vic20.poke(45, programEnd & 0xFF);
+                                window.vic20.poke(46, (programEnd >> 8) & 0xFF);
+                                
+                                const newBasicStart = window.vic20.peek(43) + (window.vic20.peek(44) * 256);
+                                console.log("✅ BASIC start pointer fixed to:", "0x" + newBasicStart.toString(16));
+                            } else if (basicStart === loadAddress || basicStart === 0x1001 || (basicStart > 0x1000 && basicStart <= 0xFFFF)) {
                                 console.log("✅ Program appears to be loaded correctly");
+                            } else if (basicStart === 0) {
+                                console.log("ℹ️ BASIC start pointer is 0 - this is normal for pure machine code programs");
                             } else {
-                                console.warn("⚠️ BASIC start pointer unexpected:", basicStart);
+                                console.warn("⚠️ BASIC start pointer unexpected:", basicStart, "expected around", loadAddress);
                             }
                         }
                     }, 200);
@@ -370,9 +396,19 @@
                             window.vic20.reset();
                         }
                         
-                        // Configure for unexpanded VIC-20 (default)
-                        if (typeof window.vic20.config === 'function') {
-                            window.vic20.config(0);
+                        // Configure memory expansion from URL parameter (optional)
+                        // If not provided, load_prg() will handle it automatically (like drag-and-drop does)
+                        // config values: 0=unexpanded, 1=+3K, 2=+8K, 3=+16K, 4=+24K, 5=+8K (alternative)
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const memoryConfig = urlParams.get('memory');
+                        if (memoryConfig !== null && typeof window.vic20.config === 'function') {
+                            const parsed = parseInt(memoryConfig, 10);
+                            if (!isNaN(parsed) && parsed >= 0 && parsed <= 5) {
+                                console.log(`VIC-20 iframe: Setting memory config to ${parsed}`);
+                                window.vic20.config(parsed);
+                            }
+                        } else {
+                            console.log("VIC-20 iframe: No memory config specified, letting load_prg() handle it automatically");
                         }
                         
                         // Set up main emulation loop

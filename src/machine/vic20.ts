@@ -3,19 +3,30 @@
   // Add global functions for VIC-20 iframe URL generation
   (window as any).vic20_debug = {
     // Generate iframe URL with program data
-    generateIframeURL: (programData: Uint8Array, useBase64: boolean = true) => {
+    // memoryConfig: 0=unexpanded, 1=+3K, 2=+8K, 3=+16K, 4=+24K, 5=+8K (alternative)
+    // Note: If not provided, load_prg() will handle memory expansion automatically
+    generateIframeURL: (programData: Uint8Array, useBase64: boolean = true, memoryConfig?: number) => {
       const baseURL = 'vic20-iframe.html';
       
+      let url: string;
       if (useBase64) {
         // Convert to base64 for shorter URLs
         const binaryString = String.fromCharCode.apply(null, Array.from(programData));
         const base64Data = btoa(binaryString);
-        return `${baseURL}?program=${encodeURIComponent(base64Data)}`;
+        url = `${baseURL}?program=${encodeURIComponent(base64Data)}`;
       } else {
         // Convert to hex string
         const hexString = Array.from(programData).map(b => b.toString(16).padStart(2, '0')).join(' ');
-        return `${baseURL}?hex=${encodeURIComponent(hexString)}`;
+        url = `${baseURL}?hex=${encodeURIComponent(hexString)}`;
       }
+      
+      // Only add memory config parameter if explicitly provided
+      // Otherwise, let load_prg() handle it automatically (like drag-and-drop does)
+      if (memoryConfig !== undefined) {
+        url += `&memory=${memoryConfig}`;
+      }
+      
+      return url;
     },
     
     // Open iframe with current compiled program
@@ -825,19 +836,30 @@ export class VIC20ChipsMachine implements Machine {
       run: () => this.run(),
       stop: () => this.stop(),
       // Add function to generate iframe URL with program data
-      generateIframeURL: (programData: Uint8Array, useBase64: boolean = true) => {
+      // memoryConfig: 0=unexpanded, 1=+3K, 2=+8K, 3=+16K, 4=+24K, 5=+8K (alternative)
+      // Note: If not provided, load_prg() will handle memory expansion automatically
+      generateIframeURL: (programData: Uint8Array, useBase64: boolean = true, memoryConfig?: number) => {
         const baseURL = 'vic20-iframe.html';
         
+        let url: string;
         if (useBase64) {
           // Convert to base64 for shorter URLs
           const binaryString = String.fromCharCode.apply(null, Array.from(programData));
           const base64Data = btoa(binaryString);
-          return `${baseURL}?program=${encodeURIComponent(base64Data)}`;
+          url = `${baseURL}?program=${encodeURIComponent(base64Data)}`;
         } else {
           // Convert to hex string
           const hexString = Array.from(programData).map(b => b.toString(16).padStart(2, '0')).join(' ');
-          return `${baseURL}?hex=${encodeURIComponent(hexString)}`;
+          url = `${baseURL}?hex=${encodeURIComponent(hexString)}`;
         }
+        
+        // Only add memory config parameter if explicitly provided
+        // Otherwise, let load_prg() handle it automatically (like drag-and-drop does)
+        if (memoryConfig !== undefined) {
+          url += `&memory=${memoryConfig}`;
+        }
+        
+        return url;
       },
       // Add function to open iframe with current compiled program
       openIframeWithCurrentProgram: () => {

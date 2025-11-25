@@ -8,9 +8,13 @@ const VIC20_PRESETS : Preset[] = [
   {id:'control.bas', name:'Control Codes Demo (BASIC)'},
   {id:'labels.bas', name:'Label Demo (BASIC)'},
   {id:'guess.bas', name:'Number Guessing (BASIC)'},
+  {id:'skeleton.bas', name:'BASIC Boilerplate'},
   {id:'hello.c', name:'Hello World', category:'C'},
   {id:'siegegame.c', name:'Siege Game'},
-  {id:'skeleton.cc65', name:'C/CC65 Boilerplate'},
+  {id:'hello.asm', name:'Hello World (Expanded)', category:'Assembly (KickAss)'},
+  {id:'hello-unexpanded.asm', name:'Hello World (Unexpanded)'},
+  {id:'hello-manual.asm', name:'Hello World (Manual BASIC)'},
+ 
 ];
 
 const VIC20_MEMORY_MAP = { main:[
@@ -346,6 +350,12 @@ class VIC20ChipsPlatform implements Platform {
   }
 
   getDefaultExtension() {
+    // Check current file to determine default extension
+    const currentFile = (window as any).IDE?.getCurrentMainFilename?.();
+    if (currentFile) {
+      if (currentFile.endsWith(".asm")) return ".prg"; // KickAssembler outputs .prg
+      if (currentFile.endsWith(".bas")) return ".prg"; // BASIC outputs .prg
+    }
     return ".c";
   }
 
@@ -354,11 +364,15 @@ class VIC20ChipsPlatform implements Platform {
     // Common load addresses: 0x1001 (BASIC), 0x1200, 0x1300, etc.
     if (rom && rom.length >= 2) {
       const loadAddress = (rom[1] << 8) | rom[0];
+      console.log(`VIC20 getROMExtension: loadAddress=0x${loadAddress.toString(16)}, rom.length=${rom.length}`);
       // Check if it's a valid VIC-20 load address
+      // VIC-20 uses 0x1001 for BASIC start, but also supports other addresses
       if (loadAddress >= 0x1000 && loadAddress <= 0xFFFF) {
+        console.log("VIC20 getROMExtension: returning .prg");
         return ".prg";
       }
     }
+    console.log("VIC20 getROMExtension: returning .bin (fallback)");
     return ".bin";
   }
 
@@ -490,6 +504,7 @@ class VIC20ChipsPlatform implements Platform {
 
   getToolForFilename(filename: string): string {
     if (filename.toLowerCase().endsWith(".bas")) return "c64basic";
+    if (filename.endsWith(".asm")) return "kickass";
     if (filename.endsWith(".c")) return "cc65";
     if (filename.endsWith(".dasm")) return "dasm";
     if (filename.endsWith(".acme")) return "acme";
