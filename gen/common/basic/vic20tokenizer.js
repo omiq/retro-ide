@@ -413,10 +413,10 @@ class VIC20BasicTokenizer {
         lines.forEach((line, idx) => {
             console.log(`  Source line ${idx + 1}: "${line.substring(0, 60).replace(/\n/g, '\\n').replace(/\r/g, '\\r')}"`);
         });
-        // First pass: collect all lines and determine line numbers
+        // PASS 1: Collect all lines with their line numbers (without processing labels yet)
         const labels = {};
         const processedLines = [];
-        const pendingLabels = [];
+        const unnumberedLabels = []; // Labels without line numbers
         let lineNumber = 10; // Default starting line number
         for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             const sourceLine = lines[lineIdx];
@@ -431,28 +431,11 @@ class VIC20BasicTokenizer {
             const lineMatch = trimmed.match(/^(\d+)(\s*)(.+)$/);
             if (lineMatch && lineMatch[3].trim().length > 0) {
                 const newLineNumber = parseInt(lineMatch[1]);
-                // Resolve any pending labels to this line number (they point to this actual line)
-                // Also create REM lines for these labels at this line number
-                // (They may be removed as duplicates, but the label will still point correctly)
-                for (const pending of pendingLabels) {
-                    labels[pending.label] = newLineNumber;
-                    // Create REM line for the label (may be removed as duplicate, but label points correctly)
-                    const remCode = 'REM ' + pending.label;
-                    processedLines.push({ lineNumber: newLineNumber, code: remCode, sourceLine: `REM ${pending.label}` });
-                    console.log(`🎯 Creating REM line for pending label "${pending.label}" at line ${newLineNumber}`);
-                }
-                pendingLabels.length = 0; // Clear resolved labels
-                // Update lineNumber to this explicit number, and set next auto-number to be higher
-                // This ensures that after processing a line with explicit number, the next auto-numbered
-                // line will be higher than this one (unless another explicit number is used)
                 lineNumber = newLineNumber;
                 let code = lineMatch[3].trim(); // Trim the code part (group 3 is the code after optional space)
                 // Safeguard: If code still starts with digits that match the line number, strip them
-                // This handles edge cases where the regex might not have matched correctly
                 const lineNumberStr = newLineNumber.toString();
                 if (code.startsWith(lineNumberStr) && code.length > lineNumberStr.length) {
-                    // Check if the next character after the line number is not a digit
-                    // (to avoid stripping "10PRINT" when line number is 1)
                     const nextChar = code[lineNumberStr.length];
                     if (!/\d/.test(nextChar)) {
                         code = code.substring(lineNumberStr.length);
@@ -463,14 +446,14 @@ class VIC20BasicTokenizer {
                 const standaloneLabelMatch = code.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*$/);
                 if (standaloneLabelMatch) {
                     const label = standaloneLabelMatch[1].toLowerCase();
-                    // Store label pointing to this line number
+                    // Label has a line number - it points to this line number
+                    // We'll create a REM line at this line number in pass 2
+                    // For now, track it as a label that needs a REM line
+                    unnumberedLabels.push({ label, sourceLine: trimmed, position: lineIdx });
+                    // Also track that this label points to this line number
                     labels[label] = lineNumber;
-                    // Convert to REM statement so it's valid BASIC (e.g., "4 REM LOOP")
-                    const remCode = 'REM ' + standaloneLabelMatch[1];
-                    console.log(`🎯 Converting standalone label at line ${lineNumber}: "${code}" -> "${remCode}"`);
-                    processedLines.push({ lineNumber, code: remCode, sourceLine: trimmed });
-                    // After processing explicit line number, ensure next auto-number is higher
-                    // Round up to next multiple of 10 to maintain consistent spacing
+                    console.log(`🎯 Found standalone label "${label}" at line ${lineNumber} (will create REM at line ${lineNumber} in pass 2)`);
+                    // Don't add a line for this yet - it will be inserted in pass 2
                     lineNumber = Math.ceil((lineNumber + 1) / 10) * 10;
                     continue;
                 }
@@ -479,16 +462,14 @@ class VIC20BasicTokenizer {
                 if (codeLabelMatch) {
                     const label = codeLabelMatch[1].toLowerCase();
                     const actualCode = codeLabelMatch[2];
+                    // Track label - it points to this line number
                     labels[label] = lineNumber;
-                    processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed });
+                    processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed, hasLabel: true, labelName: label, sourcePosition: lineIdx });
                 }
                 else {
-                    processedLines.push({ lineNumber, code, sourceLine: trimmed });
+                    processedLines.push({ lineNumber, code, sourceLine: trimmed, sourcePosition: lineIdx });
                 }
                 // After processing explicit line number, ensure next auto-number is higher
-                // Round up to next multiple of 10 to maintain consistent spacing
-                // This ensures that if we have "100 Z=Z+1" followed by auto-numbered lines,
-                // they will be 110, 120, etc., not 100 again
                 lineNumber = Math.ceil((lineNumber + 1) / 10) * 10;
             }
             else {
@@ -496,14 +477,11 @@ class VIC20BasicTokenizer {
                 const standaloneLabelMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*$/);
                 if (standaloneLabelMatch) {
                     const label = standaloneLabelMatch[1].toLowerCase();
-                    // Store label pointing to this line number
-                    labels[label] = lineNumber;
-                    // Convert to REM statement so it's valid BASIC (e.g., "10 REM START")
-                    const remCode = 'REM ' + standaloneLabelMatch[1];
-                    console.log(`🎯 Converting standalone label (no line number): "${trimmed}" -> "${remCode}" at line ${lineNumber}`);
-                    processedLines.push({ lineNumber, code: remCode, sourceLine: trimmed });
-                    // Increment line number for next line
-                    lineNumber += 10;
+                    // Track label but don't assign line number yet - will be done in pass 2
+                    unnumberedLabels.push({ label, sourceLine: trimmed, position: lineIdx });
+                    console.log(`🎯 Found standalone label "${label}" without line number (will be converted to REM in pass 2)`);
+                    // Don't increment lineNumber - the label will get a line number in pass 2
+                    continue;
                 }
                 else {
                     // Auto-assign line number for regular code
@@ -512,28 +490,113 @@ class VIC20BasicTokenizer {
                         const label = codeLabelMatch[1].toLowerCase();
                         const actualCode = codeLabelMatch[2];
                         labels[label] = lineNumber;
-                        processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed });
+                        processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed, hasLabel: true, labelName: label, sourcePosition: lineIdx });
                     }
                     else {
-                        processedLines.push({ lineNumber, code: trimmed, sourceLine: trimmed });
+                        processedLines.push({ lineNumber, code: trimmed, sourceLine: trimmed, sourcePosition: lineIdx });
                     }
                     lineNumber += 10;
                 }
             }
         }
-        console.log(`🎯 First pass complete: ${processedLines.length} lines processed`);
+        console.log(`🎯 Pass 1 complete: ${processedLines.length} lines with line numbers, ${unnumberedLabels.length} unnumbered labels`);
         processedLines.forEach((line, idx) => {
             console.log(`  Line ${idx}: number=${line.lineNumber}, code="${line.code.substring(0, 40)}"`);
         });
-        // Sort lines by line number to ensure correct order (in case of duplicates or out-of-order)
+        // Sort lines by line number to ensure correct order
         processedLines.sort((a, b) => a.lineNumber - b.lineNumber);
-        // Remove duplicate line numbers - but keep REM label lines by adjusting their line numbers
-        // REM label lines should be kept, not removed, even if they conflict with actual code
+        // PASS 2: Convert labels to REM statements and insert them at appropriate line numbers
+        // For each unnumbered label, find the line number between the previous and next allocated line numbers
+        for (const labelInfo of unnumberedLabels) {
+            const label = labelInfo.label;
+            const labelPosition = labelInfo.position;
+            // Check if this label already has a line number assigned (from pass 1)
+            let targetLineNumber;
+            if (labels[label] !== undefined) {
+                // Label already has a line number (e.g., "10 START:")
+                targetLineNumber = labels[label];
+                console.log(`🎯 Pass 2: Label "${label}" already assigned to line ${targetLineNumber}`);
+            }
+            else {
+                // Label doesn't have a line number (e.g., "START:" without line number)
+                // Find the previous and next lines with line numbers based on source position
+                let prevLineNumber = 0;
+                let nextLineNumber = Infinity;
+                // Find the last line with a line number that appears before this label in the source
+                for (const line of processedLines) {
+                    if (line.sourcePosition < labelPosition && line.lineNumber > prevLineNumber) {
+                        prevLineNumber = line.lineNumber;
+                    }
+                    if (line.sourcePosition > labelPosition && line.lineNumber < nextLineNumber) {
+                        nextLineNumber = line.lineNumber;
+                    }
+                }
+                // Calculate target line number: between prevLineNumber and nextLineNumber
+                if (nextLineNumber === Infinity) {
+                    // No line after this label - use a number after the previous line
+                    targetLineNumber = prevLineNumber + 1;
+                }
+                else if (prevLineNumber === 0) {
+                    // No line before this label - use a number before the next line
+                    targetLineNumber = Math.max(1, nextLineNumber - 1);
+                }
+                else {
+                    // Find a number between prevLineNumber and nextLineNumber
+                    const gap = nextLineNumber - prevLineNumber;
+                    if (gap > 1) {
+                        // There's a gap - use a number in the middle
+                        targetLineNumber = prevLineNumber + Math.floor(gap / 2);
+                    }
+                    else {
+                        // No gap - use a number just before nextLineNumber
+                        targetLineNumber = nextLineNumber - 1;
+                    }
+                }
+                // Make sure the target line number doesn't conflict with existing lines
+                const existingLineNumbers = new Set(processedLines.map(l => l.lineNumber));
+                while (existingLineNumbers.has(targetLineNumber) && targetLineNumber > prevLineNumber && targetLineNumber < nextLineNumber) {
+                    // Try moving closer to prevLineNumber
+                    if (targetLineNumber > prevLineNumber + 1) {
+                        targetLineNumber--;
+                    }
+                    else {
+                        // Can't fit between, use nextLineNumber + 1
+                        targetLineNumber = nextLineNumber + 1;
+                        break;
+                    }
+                }
+                // If we still have a conflict, find the next available number
+                while (existingLineNumbers.has(targetLineNumber)) {
+                    targetLineNumber++;
+                }
+                // Assign the label to this line number
+                labels[label] = targetLineNumber;
+                console.log(`🎯 Pass 2: Inserted REM label "${label}" at line ${targetLineNumber} (between ${prevLineNumber} and ${nextLineNumber === Infinity ? 'end' : nextLineNumber})`);
+            }
+            // Check if target line number conflicts with existing code
+            const existingLine = processedLines.find(l => l.lineNumber === targetLineNumber);
+            if (existingLine && !existingLine.code.trim().toUpperCase().startsWith('REM')) {
+                // Conflict with actual code - move the existing code to next available line number
+                const existingLineNumbers = new Set(processedLines.map(l => l.lineNumber));
+                let newLineNumber = targetLineNumber + 1;
+                while (existingLineNumbers.has(newLineNumber)) {
+                    newLineNumber++;
+                }
+                console.log(`🎯 Pass 2: Moving conflicting code from line ${targetLineNumber} to ${newLineNumber}: "${existingLine.code.substring(0, 40)}"`);
+                existingLine.lineNumber = newLineNumber;
+            }
+            // Create REM line for the label
+            const remCode = 'REM ' + label;
+            processedLines.push({ lineNumber: targetLineNumber, code: remCode, sourceLine: labelInfo.sourceLine, sourcePosition: labelPosition });
+        }
+        // Sort again after inserting REM labels
+        processedLines.sort((a, b) => a.lineNumber - b.lineNumber);
+        // Remove duplicate line numbers (keep the last one, BASIC behavior)
+        // But preserve REM labels - if a REM conflicts with actual code, keep both by moving actual code
         const seenLineNumbers = new Map();
         for (const line of processedLines) {
             const existing = seenLineNumbers.get(line.lineNumber);
             if (!existing) {
-                // First time seeing this line number - keep it
                 seenLineNumbers.set(line.lineNumber, line);
             }
             else {
@@ -541,52 +604,35 @@ class VIC20BasicTokenizer {
                 const isRem = line.code.trim().toUpperCase().startsWith('REM');
                 const existingIsRem = existing.code.trim().toUpperCase().startsWith('REM');
                 if (isRem && !existingIsRem) {
-                    // Current is REM label, existing is actual code - keep both, put REM on previous line
-                    let remLineNumber = line.lineNumber - 1;
-                    if (remLineNumber < 0)
-                        remLineNumber = 0; // VIC-20 allows line numbers 0-9
-                    // Make sure it doesn't conflict - keep moving backward until we find a free slot
-                    while (seenLineNumbers.has(remLineNumber) && remLineNumber >= 0) {
-                        remLineNumber -= 1;
-                        if (remLineNumber < 0) {
-                            remLineNumber = 0;
-                            break; // Can't go below 0
-                        }
+                    // Current is REM, existing is actual code - keep REM, move actual code
+                    const existingLineNumbers = new Set(Array.from(seenLineNumbers.keys()));
+                    let newLineNumber = line.lineNumber + 1;
+                    while (existingLineNumbers.has(newLineNumber)) {
+                        newLineNumber++;
                     }
-                    if (remLineNumber < line.lineNumber && remLineNumber >= 0) {
-                        seenLineNumbers.set(remLineNumber, Object.assign(Object.assign({}, line), { lineNumber: remLineNumber }));
-                        console.log(`🎯 Keeping REM label by moving it to line ${remLineNumber} (was ${line.lineNumber}, conflicts with actual code)`);
-                    }
-                    else {
-                        // Can't find a spot before, try after instead
-                        let nextLineNumber = line.lineNumber + 1;
-                        while (seenLineNumbers.has(nextLineNumber)) {
-                            nextLineNumber += 1;
-                        }
-                        seenLineNumbers.set(nextLineNumber, Object.assign(Object.assign({}, line), { lineNumber: nextLineNumber }));
-                        console.log(`🎯 Keeping REM label by moving it to line ${nextLineNumber} (was ${line.lineNumber}, couldn't fit before)`);
-                    }
+                    console.log(`🎯 Pass 2: Moving actual code from line ${line.lineNumber} to ${newLineNumber} to make room for REM label`);
+                    seenLineNumbers.set(newLineNumber, Object.assign(Object.assign({}, existing), { lineNumber: newLineNumber }));
+                    seenLineNumbers.set(line.lineNumber, line);
                 }
                 else if (!isRem && existingIsRem) {
-                    // Current is actual code, existing is REM label - keep both, put actual code on next available line
-                    let nextLineNumber = line.lineNumber + 1;
-                    // Find the next available line number that doesn't conflict
-                    while (seenLineNumbers.has(nextLineNumber)) {
-                        nextLineNumber += 1;
+                    // Current is actual code, existing is REM - keep REM, move actual code
+                    const existingLineNumbers = new Set(Array.from(seenLineNumbers.keys()));
+                    let newLineNumber = line.lineNumber + 1;
+                    while (existingLineNumbers.has(newLineNumber)) {
+                        newLineNumber++;
                     }
-                    seenLineNumbers.set(nextLineNumber, Object.assign(Object.assign({}, line), { lineNumber: nextLineNumber }));
-                    console.log(`🎯 Keeping REM label at ${line.lineNumber}, moving actual code to line ${nextLineNumber}`);
+                    console.log(`🎯 Pass 2: Moving actual code from line ${line.lineNumber} to ${newLineNumber} (REM label already at ${line.lineNumber})`);
+                    seenLineNumbers.set(newLineNumber, line);
                 }
                 else {
-                    // Both are same type - keep the last one (BASIC behavior)
+                    // Both same type - keep the last one (BASIC behavior)
                     console.log(`⚠️ Removing duplicate line number ${line.lineNumber}: "${existing.code.substring(0, 40)}"`);
                     seenLineNumbers.set(line.lineNumber, line);
                 }
             }
         }
-        // Convert map values to array and sort by line number
         const uniqueLines = Array.from(seenLineNumbers.values()).sort((a, b) => a.lineNumber - b.lineNumber);
-        console.log(`🎯 After duplicate removal: ${uniqueLines.length} unique lines`);
+        console.log(`🎯 Pass 2 complete: ${uniqueLines.length} unique lines after inserting REM labels`);
         uniqueLines.forEach((line, idx) => {
             console.log(`  Unique line ${idx}: number=${line.lineNumber}, code="${line.code.substring(0, 40)}"`);
         });

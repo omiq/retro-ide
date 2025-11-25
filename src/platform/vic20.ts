@@ -46,7 +46,16 @@ class VIC20ChipsPlatform implements Platform {
     
     // Clear the main element but don't add any emulator
  //   this.mainElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">VIC-20 Emulator disabled for testing.<br>Use the isolated emulator in another tab.</div>';
-   this.mainElement.innerHTML = '<iframe id="vic20-iframe" src="vic20-iframe.html" style="width: 100%; height: 500px; border: none;"></iframe>'; 
+   this.mainElement.innerHTML = '<iframe id="vic20-iframe" src="vic20-iframe.html" style="width: 100%; height: 500px; border: none;" tabindex="-1"></iframe>'; 
+    // Make iframe not focusable to prevent parent window from detecting focus
+    const frame = document.getElementById("vic20-iframe") as HTMLIFrameElement;
+    if (frame) {
+      frame.setAttribute('tabindex', '-1');
+      // Prevent iframe focus from bubbling
+      frame.addEventListener('focus', (e) => {
+        e.stopPropagation();
+      }, true);
+    }
     console.log("VIC20ChipsPlatform: iframe created, setting up with auto-compilation");
     
     // Wait for the iframe to load, then set it up with auto-compilation
@@ -150,7 +159,7 @@ class VIC20ChipsPlatform implements Platform {
         frame.addEventListener('load', onLoad);
       } else {
         // For small programs, use URL parameters
-        const vic20_debug = (window as any).vic20_debug;
+      const vic20_debug = (window as any).vic20_debug;
         if (vic20_debug && vic20_debug.generateIframeURL) {
           // Handle async generateIframeURL (like C64 does)
           const urlResult = vic20_debug.generateIframeURL(rom);
@@ -184,30 +193,30 @@ class VIC20ChipsPlatform implements Platform {
           } else {
             // Synchronous version
             const iframeURL = urlResult as string;
-            console.log("VIC20ChipsPlatform: Generated iframe URL:", iframeURL);
-            
-            if (iframeURL) {
-              const cacheBuster = '&t=' + Date.now();
-              const freshURL = iframeURL + cacheBuster;
-              console.log("VIC20ChipsPlatform: Loading fresh URL with cache buster:", freshURL);
-              
-              // Set up a one-time load event listener
-              const onLoad = () => {
-                console.log("VIC20ChipsPlatform: iframe loaded, calling checkForProgramInURL");
-                if ((frame.contentWindow as any).checkForProgramInURL) {
-                  (frame.contentWindow as any).checkForProgramInURL();
-                }
-                frame.removeEventListener('load', onLoad);
-              };
-              frame.addEventListener('load', onLoad);
-              
-              // Set the location (this triggers the load event)
-              frame.contentWindow.location = freshURL;
-            } else {
+        console.log("VIC20ChipsPlatform: Generated iframe URL:", iframeURL);
+        
+        if (iframeURL) {
+          const cacheBuster = '&t=' + Date.now();
+          const freshURL = iframeURL + cacheBuster;
+          console.log("VIC20ChipsPlatform: Loading fresh URL with cache buster:", freshURL);
+          
+          // Set up a one-time load event listener
+          const onLoad = () => {
+            console.log("VIC20ChipsPlatform: iframe loaded, calling checkForProgramInURL");
+            if ((frame.contentWindow as any).checkForProgramInURL) {
+              (frame.contentWindow as any).checkForProgramInURL();
+            }
+            frame.removeEventListener('load', onLoad);
+          };
+          frame.addEventListener('load', onLoad);
+          
+          // Set the location (this triggers the load event)
+          frame.contentWindow.location = freshURL;
+        } else {
               console.error("VIC20ChipsPlatform: generateIframeURL returned null");
             }
-          }
-        } else {
+        }
+      } else {
           console.error("VIC20ChipsPlatform: vic20_debug.generateIframeURL not available");
         }
       }
@@ -424,7 +433,7 @@ class VIC20ChipsPlatform implements Platform {
     
     // Also reset the local machine for consistency
     if (this.machine) {
-      this.machine.reset();
+    this.machine.reset();
     }
   }
 

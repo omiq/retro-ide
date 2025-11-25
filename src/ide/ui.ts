@@ -1104,6 +1104,10 @@ export function setupBreakpoint(btnid? : DebugCommandType) {
 }
 
 function _pause() {
+  // Don't pause VIC-20 - it handles its own pause/resume in the iframe
+  if (platform_id === 'vic20') {
+    return;
+  }
   if (platform && platform.isRunning()) {
     platform.pause();
     console.log("Paused");
@@ -1114,6 +1118,14 @@ function _pause() {
 function pause() {
   if (!checkRunReady()) return;
   clearBreakpoint();
+  // For VIC-20, send pause command directly to iframe (bypass _pause which is disabled for VIC-20)
+  if (platform_id === 'vic20' && platform) {
+    platform.pause();
+    console.log("Paused");
+    userPaused = true;
+    setDebugButtonState("pause", "stopped");
+    return;
+  }
   _pause();
   userPaused = true;
 }
@@ -1887,9 +1899,9 @@ function showInstructions() {
   var vcanvas = $("#emulator").find("canvas");
   if (vcanvas) {
     vcanvas.on('focus', () => {
-      // Don't pause Apple IIe when focusing - it's in an iframe and handles its own events
-      if (platform_id === 'apple2e') {
-        // Apple IIe handles focus in the iframe, don't pause here
+      // Don't pause platforms in iframes when focusing - they handle their own events
+      if (platform_id === 'apple2e' || platform_id === 'vic20') {
+        // These platforms handle focus in the iframe, don't pause here
         return;
       }
       if (platform && platform.isRunning && platform.isRunning()) {

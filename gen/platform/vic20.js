@@ -37,7 +37,16 @@ class VIC20ChipsPlatform {
         // The platform is available but no emulator is loaded or displayed
         // Clear the main element but don't add any emulator
         //   this.mainElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">VIC-20 Emulator disabled for testing.<br>Use the isolated emulator in another tab.</div>';
-        this.mainElement.innerHTML = '<iframe id="vic20-iframe" src="vic20-iframe.html" style="width: 100%; height: 500px; border: none;"></iframe>';
+        this.mainElement.innerHTML = '<iframe id="vic20-iframe" src="vic20-iframe.html" style="width: 100%; height: 500px; border: none;" tabindex="-1"></iframe>';
+        // Make iframe not focusable to prevent parent window from detecting focus
+        const frame = document.getElementById("vic20-iframe");
+        if (frame) {
+            frame.setAttribute('tabindex', '-1');
+            // Prevent iframe focus from bubbling
+            frame.addEventListener('focus', (e) => {
+                e.stopPropagation();
+            }, true);
+        }
         console.log("VIC20ChipsPlatform: iframe created, setting up with auto-compilation");
         // Wait for the iframe to load, then set it up with auto-compilation
         setTimeout(() => {

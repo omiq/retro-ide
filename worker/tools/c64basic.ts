@@ -24,7 +24,7 @@ export function compileC64Basic(step: BuildStep): BuildStepResult {
                 prgData = tokenizer.compile(source);
             } else {
                 // C64 and other platforms use the original C64 tokenizer (unchanged)
-                const tokenizer = new C64BasicTokenizer();
+            const tokenizer = new C64BasicTokenizer();
                 prgData = tokenizer.compile(source);
             }
             

@@ -11,16 +11,38 @@
             background-color: #000;
             font-family: monospace;
             overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        
+        #canvas-container {
+
+            max-height: 100%;
+            max-width: 100%;
+            aspect-ratio: 600 / 400;
+            width: 600px;
+          
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #000;
         }
         
         #canvas {
             border: 1px solid #333;
+            aspect-ratio: 600 / 400;
+            max-width: 100%;
+            max-height: 100%;
             cursor: pointer;
-            width: 100%;
-            height: 100vh;
             outline: none;
             display: block;
-            margin: 0 auto;
+            width: 600px;
+            
+            /* image-rendering: pixelated; */
+            /* image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges; */
         }
         
         #canvas:focus {
@@ -43,7 +65,9 @@
 </head>
 <body>
     <div class="status" id="status">Loading VIC-20 emulator...</div>
-    <canvas id="canvas" width="800" height="501" tabindex="0"></canvas>
+    <div id="canvas-container">
+        <canvas id="canvas" width="416" height="528" tabindex="0"></canvas>
+    </div>
 
     <script>
         // This iframe has its own isolated window object
@@ -56,6 +80,8 @@
         const SCREEN_W = 208;
         const SCREEN_H = 264;
         const PIXEL_WIDTH = 2;
+        
+        // Canvas resize function disabled - canvas will use CSS for sizing
         
         window.m6561_screen_update = function(ptr) {
             const instance = typeof wasm_instance !== 'undefined' ? wasm_instance : 
@@ -188,11 +214,30 @@
                     console.log("✅ Program loaded via vic20.load_prg()");
                     updateStatus("Program loaded: " + programData.length + " bytes");
                     
-                    // Type RUN command to execute the program (similar to fork's do_load function)
+                    // Verify program was loaded by checking BASIC start pointer (address 43-44)
+                    // Address 43-44 contains the start of BASIC program (low byte, high byte)
+                    // Should be 0x1001 (4097) for a valid program
+                    setTimeout(() => {
+                        if (window.vic20 && window.vic20.peek) {
+                            const basicStartLow = window.vic20.peek(43);
+                            const basicStartHigh = window.vic20.peek(44);
+                            const basicStart = basicStartLow + (basicStartHigh * 256);
+                            console.log("🎯 BASIC start pointer:", "0x" + basicStart.toString(16), "(" + basicStart + ")");
+                            
+                            if (basicStart === 0x1001 || basicStart > 0x1000) {
+                                console.log("✅ Program appears to be loaded correctly");
+                            } else {
+                                console.warn("⚠️ BASIC start pointer unexpected:", basicStart);
+                            }
+                        }
+                    }, 200);
+                    
+                    // Type RUN command to execute the program
+                    // Wait longer to ensure program is fully loaded and emulator is ready
                     setTimeout(() => {
                         console.log("🎯 Typing RUN command...");
                         typeTextIntoEmulator("RUN\r");
-                    }, 500);
+                    }, 1000);
                 } else {
                     updateStatus("vic20.load_prg not available");
                     console.error("❌ vic20.load_prg function not available");
@@ -316,6 +361,7 @@
                             ctx.fillRect(0, 0, canvas.width, canvas.height);
                         }
                         
+                        // Initialize the emulator
                         window.vic20.init();
                         updateStatus("VIC-20 emulator initialized");
                         
@@ -329,26 +375,61 @@
                             window.vic20.config(0);
                         }
                         
-                        // Set up main emulation loop (similar to fork's oneFrame function)
-                        // Limit execution to ~16ms per frame (60fps) to prevent browser freezing
+                        // Set up main emulation loop
                         let lastTimestamp = performance.now();
                         let animationFrameId = null;
                         let isPaused = false;
+                        let accumulatedTime = 0;
                         
                         function oneFrame(timestamp) {
                             if (isPaused) {
-                                // Don't update timestamp when paused, so we don't accumulate time
                                 animationFrameId = requestAnimationFrame(oneFrame);
                                 return;
                             }
                             
-                            const usec = Math.min((timestamp - lastTimestamp) * 1000, 16000); // Max 16ms per frame
+                            // Calculate time delta, cap it to prevent large jumps
+                            const deltaTime = Math.min((timestamp - lastTimestamp) * 1000, 16000);
                             lastTimestamp = timestamp;
+                            accumulatedTime += deltaTime;
+                            
+                            // Execute in small chunks to prevent browser freezing
+                            // Limit to 2ms per frame to keep browser responsive
+                            const MAX_TIME_PER_FRAME = 2000; // 2ms in microseconds
+                            const CHUNK_SIZE = 1000; // 1ms chunks
                             
                             if (window.vic20 && typeof window.vic20.exec_us === 'function') {
-                                window.vic20.exec_us(usec);
+                                while (accumulatedTime > 0) {
+                                    const chunkTime = Math.min(accumulatedTime, CHUNK_SIZE);
+                                    const startTime = performance.now();
+                                    
+                                    try {
+                                        window.vic20.exec_us(chunkTime);
+                                        accumulatedTime -= chunkTime;
+                                        
+                                        // If execution took too long, stop for this frame
+                                        const executionTime = (performance.now() - startTime) * 1000;
+                                        if (executionTime > MAX_TIME_PER_FRAME) {
+                                            break;
+                                        }
+                                    } catch (e) {
+                                        console.error("VIC-20 iframe: Error in exec_us:", e);
+                                        accumulatedTime = 0;
+                                        break;
+                                    }
+                                    
+                                    // Don't execute more than MAX_TIME_PER_FRAME per frame
+                                    if ((performance.now() - startTime) * 1000 > MAX_TIME_PER_FRAME) {
+                                        break;
+                                    }
+                                }
+                                
+                                // Cap accumulated time to prevent runaway
+                                if (accumulatedTime > 16000) {
+                                    accumulatedTime = 16000;
+                                }
                             }
                             
+                            // Schedule next frame
                             animationFrameId = requestAnimationFrame(oneFrame);
                         }
                         
@@ -520,15 +601,20 @@
         });
         
         // Add click event to focus canvas
+        // Stop these events from bubbling to parent to prevent pause/resume
         canvas.addEventListener('click', function(event) {
+            event.stopPropagation(); // Prevent bubbling to parent window
+            event.stopImmediatePropagation(); // Stop other handlers
             canvas.focus();
             updateStatus("Canvas focused - keyboard input enabled");
-        });
+        }, true); // Use capture phase
         
         // Also focus on mousedown to ensure immediate focus
         canvas.addEventListener('mousedown', function(event) {
+            event.stopPropagation(); // Prevent bubbling to parent window
+            event.stopImmediatePropagation(); // Stop other handlers
             canvas.focus();
-        });
+        }, true); // Use capture phase
         
         // Add document-level keyboard listeners as fallback (when canvas doesn't have focus)
         // Only handle if the target is not the canvas (to avoid duplicate events)
@@ -596,15 +682,18 @@
         });
         
         // Add focus/blur events to debug focus state
+        // Stop these events from bubbling to parent to prevent pause/resume
         canvas.addEventListener('focus', function(event) {
+            event.stopPropagation(); // Prevent bubbling to parent window
             console.log("VIC-20 iframe canvas focused");
             updateStatus("Canvas focused - ready for keyboard input");
-        });
+        }, true); // Use capture phase
         
         canvas.addEventListener('blur', function(event) {
+            event.stopPropagation(); // Prevent bubbling to parent window
             console.log("VIC-20 iframe canvas blurred");
             updateStatus("Canvas blurred - keyboard input disabled");
-        });
+        }, true); // Use capture phase
         
         // Make sure the document can receive focus
         document.addEventListener('click', function(event) {

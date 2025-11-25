@@ -16537,7 +16537,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
           });
           const labels = {};
           const processedLines = [];
-          const pendingLabels = [];
+          const unnumberedLabels = [];
           let lineNumber = 10;
           for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             const sourceLine = lines[lineIdx];
@@ -16550,13 +16550,6 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
             const lineMatch = trimmed.match(/^(\d+)(\s*)(.+)$/);
             if (lineMatch && lineMatch[3].trim().length > 0) {
               const newLineNumber = parseInt(lineMatch[1]);
-              for (const pending of pendingLabels) {
-                labels[pending.label] = newLineNumber;
-                const remCode = "REM " + pending.label;
-                processedLines.push({ lineNumber: newLineNumber, code: remCode, sourceLine: `REM ${pending.label}` });
-                console.log(`\u{1F3AF} Creating REM line for pending label "${pending.label}" at line ${newLineNumber}`);
-              }
-              pendingLabels.length = 0;
               lineNumber = newLineNumber;
               let code = lineMatch[3].trim();
               const lineNumberStr = newLineNumber.toString();
@@ -16570,10 +16563,9 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
               const standaloneLabelMatch = code.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*$/);
               if (standaloneLabelMatch) {
                 const label = standaloneLabelMatch[1].toLowerCase();
+                unnumberedLabels.push({ label, sourceLine: trimmed, position: lineIdx });
                 labels[label] = lineNumber;
-                const remCode = "REM " + standaloneLabelMatch[1];
-                console.log(`\u{1F3AF} Converting standalone label at line ${lineNumber}: "${code}" -> "${remCode}"`);
-                processedLines.push({ lineNumber, code: remCode, sourceLine: trimmed });
+                console.log(`\u{1F3AF} Found standalone label "${label}" at line ${lineNumber} (will create REM at line ${lineNumber} in pass 2)`);
                 lineNumber = Math.ceil((lineNumber + 1) / 10) * 10;
                 continue;
               }
@@ -16582,38 +16574,95 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
                 const label = codeLabelMatch[1].toLowerCase();
                 const actualCode = codeLabelMatch[2];
                 labels[label] = lineNumber;
-                processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed });
+                processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed, hasLabel: true, labelName: label, sourcePosition: lineIdx });
               } else {
-                processedLines.push({ lineNumber, code, sourceLine: trimmed });
+                processedLines.push({ lineNumber, code, sourceLine: trimmed, sourcePosition: lineIdx });
               }
               lineNumber = Math.ceil((lineNumber + 1) / 10) * 10;
             } else {
               const standaloneLabelMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*$/);
               if (standaloneLabelMatch) {
                 const label = standaloneLabelMatch[1].toLowerCase();
-                labels[label] = lineNumber;
-                const remCode = "REM " + standaloneLabelMatch[1];
-                console.log(`\u{1F3AF} Converting standalone label (no line number): "${trimmed}" -> "${remCode}" at line ${lineNumber}`);
-                processedLines.push({ lineNumber, code: remCode, sourceLine: trimmed });
-                lineNumber += 10;
+                unnumberedLabels.push({ label, sourceLine: trimmed, position: lineIdx });
+                console.log(`\u{1F3AF} Found standalone label "${label}" without line number (will be converted to REM in pass 2)`);
+                continue;
               } else {
                 const codeLabelMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.+)$/);
                 if (codeLabelMatch) {
                   const label = codeLabelMatch[1].toLowerCase();
                   const actualCode = codeLabelMatch[2];
                   labels[label] = lineNumber;
-                  processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed });
+                  processedLines.push({ lineNumber, code: actualCode, sourceLine: trimmed, hasLabel: true, labelName: label, sourcePosition: lineIdx });
                 } else {
-                  processedLines.push({ lineNumber, code: trimmed, sourceLine: trimmed });
+                  processedLines.push({ lineNumber, code: trimmed, sourceLine: trimmed, sourcePosition: lineIdx });
                 }
                 lineNumber += 10;
               }
             }
           }
-          console.log(`\u{1F3AF} First pass complete: ${processedLines.length} lines processed`);
+          console.log(`\u{1F3AF} Pass 1 complete: ${processedLines.length} lines with line numbers, ${unnumberedLabels.length} unnumbered labels`);
           processedLines.forEach((line, idx) => {
             console.log(`  Line ${idx}: number=${line.lineNumber}, code="${line.code.substring(0, 40)}"`);
           });
+          processedLines.sort((a, b) => a.lineNumber - b.lineNumber);
+          for (const labelInfo of unnumberedLabels) {
+            const label = labelInfo.label;
+            const labelPosition = labelInfo.position;
+            let targetLineNumber;
+            if (labels[label] !== void 0) {
+              targetLineNumber = labels[label];
+              console.log(`\u{1F3AF} Pass 2: Label "${label}" already assigned to line ${targetLineNumber}`);
+            } else {
+              let prevLineNumber = 0;
+              let nextLineNumber = Infinity;
+              for (const line of processedLines) {
+                if (line.sourcePosition < labelPosition && line.lineNumber > prevLineNumber) {
+                  prevLineNumber = line.lineNumber;
+                }
+                if (line.sourcePosition > labelPosition && line.lineNumber < nextLineNumber) {
+                  nextLineNumber = line.lineNumber;
+                }
+              }
+              if (nextLineNumber === Infinity) {
+                targetLineNumber = prevLineNumber + 1;
+              } else if (prevLineNumber === 0) {
+                targetLineNumber = Math.max(1, nextLineNumber - 1);
+              } else {
+                const gap = nextLineNumber - prevLineNumber;
+                if (gap > 1) {
+                  targetLineNumber = prevLineNumber + Math.floor(gap / 2);
+                } else {
+                  targetLineNumber = nextLineNumber - 1;
+                }
+              }
+              const existingLineNumbers = new Set(processedLines.map((l) => l.lineNumber));
+              while (existingLineNumbers.has(targetLineNumber) && targetLineNumber > prevLineNumber && targetLineNumber < nextLineNumber) {
+                if (targetLineNumber > prevLineNumber + 1) {
+                  targetLineNumber--;
+                } else {
+                  targetLineNumber = nextLineNumber + 1;
+                  break;
+                }
+              }
+              while (existingLineNumbers.has(targetLineNumber)) {
+                targetLineNumber++;
+              }
+              labels[label] = targetLineNumber;
+              console.log(`\u{1F3AF} Pass 2: Inserted REM label "${label}" at line ${targetLineNumber} (between ${prevLineNumber} and ${nextLineNumber === Infinity ? "end" : nextLineNumber})`);
+            }
+            const existingLine = processedLines.find((l) => l.lineNumber === targetLineNumber);
+            if (existingLine && !existingLine.code.trim().toUpperCase().startsWith("REM")) {
+              const existingLineNumbers = new Set(processedLines.map((l) => l.lineNumber));
+              let newLineNumber = targetLineNumber + 1;
+              while (existingLineNumbers.has(newLineNumber)) {
+                newLineNumber++;
+              }
+              console.log(`\u{1F3AF} Pass 2: Moving conflicting code from line ${targetLineNumber} to ${newLineNumber}: "${existingLine.code.substring(0, 40)}"`);
+              existingLine.lineNumber = newLineNumber;
+            }
+            const remCode = "REM " + label;
+            processedLines.push({ lineNumber: targetLineNumber, code: remCode, sourceLine: labelInfo.sourceLine, sourcePosition: labelPosition });
+          }
           processedLines.sort((a, b) => a.lineNumber - b.lineNumber);
           const seenLineNumbers = new Map();
           for (const line of processedLines) {
@@ -16624,34 +16673,22 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
               const isRem = line.code.trim().toUpperCase().startsWith("REM");
               const existingIsRem = existing.code.trim().toUpperCase().startsWith("REM");
               if (isRem && !existingIsRem) {
-                let remLineNumber = line.lineNumber - 1;
-                if (remLineNumber < 0)
-                  remLineNumber = 0;
-                while (seenLineNumbers.has(remLineNumber) && remLineNumber >= 0) {
-                  remLineNumber -= 1;
-                  if (remLineNumber < 0) {
-                    remLineNumber = 0;
-                    break;
-                  }
+                const existingLineNumbers = new Set(Array.from(seenLineNumbers.keys()));
+                let newLineNumber = line.lineNumber + 1;
+                while (existingLineNumbers.has(newLineNumber)) {
+                  newLineNumber++;
                 }
-                if (remLineNumber < line.lineNumber && remLineNumber >= 0) {
-                  seenLineNumbers.set(remLineNumber, __spreadProps(__spreadValues({}, line), { lineNumber: remLineNumber }));
-                  console.log(`\u{1F3AF} Keeping REM label by moving it to line ${remLineNumber} (was ${line.lineNumber}, conflicts with actual code)`);
-                } else {
-                  let nextLineNumber = line.lineNumber + 1;
-                  while (seenLineNumbers.has(nextLineNumber)) {
-                    nextLineNumber += 1;
-                  }
-                  seenLineNumbers.set(nextLineNumber, __spreadProps(__spreadValues({}, line), { lineNumber: nextLineNumber }));
-                  console.log(`\u{1F3AF} Keeping REM label by moving it to line ${nextLineNumber} (was ${line.lineNumber}, couldn't fit before)`);
-                }
+                console.log(`\u{1F3AF} Pass 2: Moving actual code from line ${line.lineNumber} to ${newLineNumber} to make room for REM label`);
+                seenLineNumbers.set(newLineNumber, __spreadProps(__spreadValues({}, existing), { lineNumber: newLineNumber }));
+                seenLineNumbers.set(line.lineNumber, line);
               } else if (!isRem && existingIsRem) {
-                let nextLineNumber = line.lineNumber + 1;
-                while (seenLineNumbers.has(nextLineNumber)) {
-                  nextLineNumber += 1;
+                const existingLineNumbers = new Set(Array.from(seenLineNumbers.keys()));
+                let newLineNumber = line.lineNumber + 1;
+                while (existingLineNumbers.has(newLineNumber)) {
+                  newLineNumber++;
                 }
-                seenLineNumbers.set(nextLineNumber, __spreadProps(__spreadValues({}, line), { lineNumber: nextLineNumber }));
-                console.log(`\u{1F3AF} Keeping REM label at ${line.lineNumber}, moving actual code to line ${nextLineNumber}`);
+                console.log(`\u{1F3AF} Pass 2: Moving actual code from line ${line.lineNumber} to ${newLineNumber} (REM label already at ${line.lineNumber})`);
+                seenLineNumbers.set(newLineNumber, line);
               } else {
                 console.log(`\u26A0\uFE0F Removing duplicate line number ${line.lineNumber}: "${existing.code.substring(0, 40)}"`);
                 seenLineNumbers.set(line.lineNumber, line);
@@ -16659,7 +16696,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
             }
           }
           const uniqueLines = Array.from(seenLineNumbers.values()).sort((a, b) => a.lineNumber - b.lineNumber);
-          console.log(`\u{1F3AF} After duplicate removal: ${uniqueLines.length} unique lines`);
+          console.log(`\u{1F3AF} Pass 2 complete: ${uniqueLines.length} unique lines after inserting REM labels`);
           uniqueLines.forEach((line, idx) => {
             console.log(`  Unique line ${idx}: number=${line.lineNumber}, code="${line.code.substring(0, 40)}"`);
           });
