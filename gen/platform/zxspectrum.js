@@ -16,6 +16,8 @@ class ZXSpectrumPlatform {
         this.blobUrls = []; // Keep blob URLs alive
         this.originalBinary = null; // Store original compiled binary for download
         this.originalFilename = null; // Store original filename for download
+        this.lastLoadedDataUrl = null; // Store last loaded data URL for reset
+        this.lastLoadedContentType = null; // Store last loaded content type for reset
         this.mainElement = mainElement;
         // Listen for messages from the iframe
         window.addEventListener('message', (event) => {
@@ -81,6 +83,10 @@ class ZXSpectrumPlatform {
         console.log("ZXSpectrumPlatform reset() called");
         // Reload the iframe to reset the emulator (like x86dosbox and apple2e)
         if (this.iframe) {
+            // Store the last loaded program to reload after iframe reloads
+            const programToReload = this.lastLoadedDataUrl;
+            const contentTypeToReload = this.lastLoadedContentType;
+            const filenameToReload = this.originalFilename;
             // Reload the iframe with a cache buster to force a fresh load
             const currentSrc = this.iframe.src.split('?')[0]; // Get base URL without params
             const cacheBuster = `?t=${Date.now()}`;
@@ -90,6 +96,26 @@ class ZXSpectrumPlatform {
             // Reset pause state
             this.isPaused = false;
             this.updatePauseButtonIcon();
+            // Reload the program after iframe loads (if we had one loaded)
+            if (programToReload && contentTypeToReload) {
+                const onIframeReload = () => {
+                    console.log("ZXSpectrumPlatform: Iframe reloaded, reloading program");
+                    if (this.iframe && this.iframe.contentWindow) {
+                        // Wait a bit for iframe to be ready
+                        setTimeout(() => {
+                            this.iframe.contentWindow.postMessage({
+                                cmd: 'load',
+                                url: programToReload,
+                                contentType: contentTypeToReload,
+                                filename: filenameToReload
+                            }, '*');
+                            console.log("ZXSpectrumPlatform: Reloaded program after reset");
+                        }, 500);
+                    }
+                    this.iframe.removeEventListener('load', onIframeReload);
+                };
+                this.iframe.addEventListener('load', onIframeReload, { once: true });
+            }
         }
     }
     isRunning() {
@@ -353,6 +379,9 @@ class ZXSpectrumPlatform {
             base64Data = btoa(String.fromCharCode(...dataToLoad));
         }
         const dataUrl = `data:${contentType};base64,${base64Data}`;
+        // Store the data URL and content type for reset
+        this.lastLoadedDataUrl = dataUrl;
+        this.lastLoadedContentType = contentType;
         console.log("ZXSpectrumPlatform: Created data URL with content type:", contentType);
         console.log("ZXSpectrumPlatform: Data URL length:", dataUrl.length, "bytes (original:", dataToLoad.length, "bytes)");
         // Send load command via postMessage to iframe wrapper
