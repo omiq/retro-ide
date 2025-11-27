@@ -47,3 +47,32 @@ After deployment, test the API using curl/Postman to POST JSON:
 - Ensure `zmakebas` is installed and executable
 - `/tmp/` directory must be writable (typically world-writable by default)
 
+## ZX Spectrum C Compilation API (z88dk)
+
+### Endpoint
+`/api/zxspectrum/compile.php`
+
+### Requirements
+- PHP 7.0 or higher
+- `zcc` (z88dk compiler) must be available at `/snap/bin/zcc` or in PATH
+
+### Testing
+After deployment, test the API using curl/Postman to POST JSON:
+```json
+{
+  "source": "#include <stdio.h>\nint main() { return 0; }",
+  "sessionID": "test123"
+}
+```
+
+### Server Configuration
+- Ensure PHP execution is enabled for `.php` files
+- Ensure `zcc` (z88dk) is installed and accessible (typically at `/snap/bin/zcc`)
+- `/tmp/` directory must be writable (typically world-writable by default)
+- The API uses z88dk with the following flags:
+  - `+zx` - ZX Spectrum target
+  - `-startup=1` - Use startup code
+  - `-clib=sdcc_iy` - Use SDCC library with IY register
+  - `-O3` - Optimization level 3
+  - `-create-app` - Create a TAP file directly
+

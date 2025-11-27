@@ -17113,8 +17113,79 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
     }
   });
 
-  // src/worker/tools/kickass.ts
+  // src/worker/tools/z88dk.ts
   function generateSessionID2() {
+    return "z88dk_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
+  }
+  async function compileZ88dk(step) {
+    const outputPath = step.prefix + ".tap";
+    gatherFiles(step);
+    if (staleFiles(step, [outputPath])) {
+      try {
+        const source = getWorkFileAsString(step.path) || "";
+        const sessionID2 = generateSessionID2();
+        const cmd = {
+          source,
+          sessionID: sessionID2
+        };
+        console.log("ZX Spectrum z88dk compile API: POST", { sessionID: sessionID2, sourceLength: source.length });
+        let result = await fetch(ZXSPECTRUM_COMPILE_API_URL, {
+          method: "POST",
+          mode: "cors",
+          body: JSON.stringify(cmd),
+          headers: {
+            "Content-Type": "application/json"
+          }
+        });
+        if (!result.ok) {
+          return {
+            errors: [{
+              line: 0,
+              msg: `HTTP ${result.status}: ${result.statusText}`,
+              path: step.path
+            }]
+          };
+        }
+        let json = await result.json();
+        if (isUnchanged(json)) {
+          return json;
+        }
+        if (isErrorResult(json)) {
+          return json;
+        }
+        if (isOutputResult(json)) {
+          if (typeof json.output === "string") {
+            json.output = stringToByteArray(atob(json.output));
+          }
+          putWorkFile(outputPath, json.output);
+          return json;
+        }
+        throw new Error(`Unexpected result from z88dk compile API: ${JSON.stringify(json)}`);
+      } catch (error) {
+        console.error("ZX Spectrum z88dk compile API error:", error);
+        return {
+          errors: [{
+            line: 0,
+            msg: `Compilation failed: ${error}`,
+            path: step.path
+          }]
+        };
+      }
+    }
+    return { unchanged: true };
+  }
+  var ZXSPECTRUM_COMPILE_API_URL;
+  var init_z88dk = __esm({
+    "src/worker/tools/z88dk.ts"() {
+      init_util();
+      init_workertypes();
+      init_builder();
+      ZXSPECTRUM_COMPILE_API_URL = "https://ide.retrogamecoders.com/api/zxspectrum/compile.php";
+    }
+  });
+
+  // src/worker/tools/kickass.ts
+  function generateSessionID3() {
     return "kickass_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
   }
   async function compileKickAss(step) {
@@ -17142,7 +17213,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
         }
         updates.push({ path, data });
       }
-      const sessionID2 = generateSessionID2();
+      const sessionID2 = generateSessionID3();
       const cmd = {
         buildStep: {
           path: step.path,
@@ -17234,6 +17305,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
       init_bbcbasic();
       init_applesoftbasic();
       init_zxbasic();
+      init_z88dk();
       init_kickass();
       TOOLS = {
         "dasm": assembleDASM,
@@ -17275,6 +17347,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
         "bbcbasic": compileBbcBasic,
         "applesoftbasic": compileAppleSoftBasic,
         "zxbasic": compileZXBasic,
+        "z88dk": compileZ88dk,
         "kickass": compileKickAss,
         "none": async (step) => {
           const { getWorkFileAsString: getWorkFileAsString3 } = await Promise.resolve().then(() => (init_builder(), builder_exports));

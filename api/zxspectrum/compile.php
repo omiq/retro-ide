@@ -1,5 +1,5 @@
 <?php
-// api/zxspectrum/tokenize.php - ZX Spectrum BASIC tokenization API endpoint
+// api/zxspectrum/compile.php - ZX Spectrum C compilation API endpoint using z88dk
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
@@ -26,12 +26,12 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 }
 
 // Validate required fields
-if (!isset($data['basic']) || !isset($data['sessionID'])) {
+if (!isset($data['source']) || !isset($data['sessionID'])) {
     http_response_code(400);
-    exit(json_encode(['error' => 'Missing required fields: basic or sessionID']));
+    exit(json_encode(['error' => 'Missing required fields: source or sessionID']));
 }
 
-$basic = $data['basic'];
+$source = $data['source'];
 $sessionID = $data['sessionID'];
 
 // Security: validate sessionID
@@ -40,49 +40,70 @@ if (!preg_match('/^[a-zA-Z0-9_-]+$/', $sessionID)) {
     exit(json_encode(['error' => 'Invalid sessionID']));
 }
 
-// Tokenize BASIC using zmakebas
-$result = tokenizeBasic($basic, $sessionID);
+// Compile C source using z88dk
+$result = compileC($source, $sessionID);
 
 echo json_encode($result);
 
 /**
- * Tokenize ZX Spectrum BASIC code using zmakebas
+ * Compile ZX Spectrum C code using z88dk
  */
-function tokenizeBasic($basic, $sessionID) {
+function compileC($source, $sessionID) {
     // Create temp file paths
-    $tempBas = "/tmp/zxspectrum-{$sessionID}.bas";
+    $tempC = "/tmp/zxspectrum-{$sessionID}.c";
+    $tempOut = "/tmp/zxspectrum-{$sessionID}";
     $tempTap = "/tmp/zxspectrum-{$sessionID}.tap";
         
-    // Write BASIC program to temporary file
-    if (file_put_contents($tempBas, $basic) === false) {
-        return ['errors' => [['line' => 0, 'msg' => "Failed to write temporary file: {$tempBas}", 'path' => '']]];
+    // Write C source to temporary file
+    if (file_put_contents($tempC, $source) === false) {
+        return ['errors' => [['line' => 0, 'msg' => "Failed to write temporary file: {$tempC}", 'path' => '']]];
     }
     
-    // Find zmakebas executable
-    $zmakebasPath = '/home/ide/htdocs/zmakebas/zmakebas';
-    if (!file_exists($zmakebasPath)) {
+    // Find zcc executable (z88dk compiler)
+    $zccPath = '/snap/bin/zcc';
+    if (!file_exists($zccPath)) {
         // Try alternative locations
-        $zmakebasPath = __DIR__ . '/../../../zmakebas/zmakebas';
-        if (!file_exists($zmakebasPath)) {
+        $zccPath = '/usr/bin/zcc';
+        if (!file_exists($zccPath)) {
             // Try in PATH
-            $zmakebasPath = 'zmakebas';
+            $zccPath = 'zcc';
         }
     }
     
-    // Run zmakebas: zmakebas -o output.tap input.bas
+    // Run zcc: zcc +zx -startup=1 -clib=sdcc_iy -O3 -create-app -o output input.c
+    // +zx = ZX Spectrum target
+    // -startup=1 = use startup code
+    // -clib=sdcc_iy = use SDCC library with IY register
+    // -O3 = optimize level 3
+    // -create-app = create a TAP file directly
     $cmd = sprintf(
-        '%s -o %s %s 2>&1',
-        escapeshellarg($zmakebasPath),
-        escapeshellarg($tempTap),
-        escapeshellarg($tempBas)
+        '%s +zx -startup=1 -clib=sdcc_iy -O3 -create-app -o %s %s 2>&1',
+        escapeshellarg($zccPath),
+        escapeshellarg($tempOut),
+        escapeshellarg($tempC)
     );
     
     exec($cmd, $output, $returnCode);
     $errorOutput = implode("\n", $output);
     
-    // Clean up temp BASIC file
-    if (file_exists($tempBas)) {
-        unlink($tempBas);
+    // Clean up temp C file
+    if (file_exists($tempC)) {
+        unlink($tempC);
+    }
+    
+    // Clean up any other temp files z88dk might create (except .tap)
+    $tempDir = dirname($tempOut);
+    $baseName = basename($tempOut);
+    if ($handle = opendir($tempDir)) {
+        while (false !== ($file = readdir($handle))) {
+            if (strpos($file, $baseName) === 0 && $file !== $baseName . '.tap') {
+                $filePath = $tempDir . '/' . $file;
+                if (is_file($filePath)) {
+                    unlink($filePath);
+                }
+            }
+        }
+        closedir($handle);
     }
     
     if ($returnCode === 0 && file_exists($tempTap)) {
@@ -109,15 +130,15 @@ function tokenizeBasic($basic, $sessionID) {
         ];
     } else {
         // Error - parse error messages
-        $errors = parseZmakebasErrors($errorOutput);
+        $errors = parseZccErrors($errorOutput);
         return ['errors' => $errors];
     }
 }
 
 /**
- * Parse zmakebas error output into structured error array
+ * Parse zcc error output into structured error array
  */
-function parseZmakebasErrors($errorOutput) {
+function parseZccErrors($errorOutput) {
     $errors = [];
     $lines = explode("\n", $errorOutput);
     
@@ -128,12 +149,20 @@ function parseZmakebasErrors($errorOutput) {
         }
         
         // Try to parse line number from error messages
-        // zmakebas error format varies, but often includes line numbers
-        if (preg_match('/line\s+(\d+)/i', $line, $matches)) {
+        // zcc/SDCC error format: filename:line:error message
+        // Example: main.c:5:2: error: syntax error
+        if (preg_match('/^([^:]+):(\d+):(\d+)?:\s*(.+)$/', $line, $matches)) {
             $errors[] = [
-                'line' => (int)$matches[1],
-                'msg' => $line,
-                'path' => ''
+                'line' => (int)$matches[2],
+                'msg' => trim($matches[4]),
+                'path' => basename($matches[1])
+            ];
+        } elseif (preg_match('/^([^:]+):(\d+):\s*(.+)$/', $line, $matches)) {
+            // Alternative format: filename:line: error message
+            $errors[] = [
+                'line' => (int)$matches[2],
+                'msg' => trim($matches[3]),
+                'path' => basename($matches[1])
             ];
         } elseif (preg_match('/error|warning|fatal/i', $line)) {
             // Generic error/warning line
@@ -157,3 +186,4 @@ function parseZmakebasErrors($errorOutput) {
     return $errors;
 }
 ?>
+

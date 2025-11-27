@@ -22675,6 +22675,33 @@ async function oscar64ProcessOutput(step, outpath) {
   }
   return { output, listings, symbolmap, segments, debuginfo };
 }
+async function z88dkProcessErrors(step, errorData) {
+  let errors = [];
+  let errorMatcher = makeErrorMatcher(errors, /([^:]+):(\d+):\s*(.+)/, 2, 3, step.path, 1);
+  for (let line of errorData.split("\n")) {
+    errorMatcher(line);
+  }
+  return { errors };
+}
+var Z88DK_TOOL = {
+  name: "z88dk",
+  version: "",
+  extensions: [".c", ".C"],
+  archs: ["z80"],
+  platforms: ["zxspectrum"],
+  processOutput: basicProcessOutput,
+  processErrors: z88dkProcessErrors,
+  platform_configs: {
+    default: {
+      command: "/snap/bin/zcc",
+      args: ["+zx", "-startup=1", "-clib=sdcc_iy", "-O3", "-create-app", "-o", "$OUTFILE", "$INFILES"],
+      outfile: "a.tap"
+    },
+    zxspectrum: {
+      outfile: "a.tap"
+    }
+  }
+};
 function findBestTool(step) {
   if (!step?.tool)
     throw new Error("No tool specified");
@@ -22688,7 +22715,8 @@ function findBestTool(step) {
 }
 var TOOLS = [
   Object.assign({}, LLVM_MOS_TOOL, { version: "latest" }),
-  Object.assign({}, OSCAR64_TOOL, { version: "latest" })
+  Object.assign({}, OSCAR64_TOOL, { version: "latest" }),
+  Object.assign({}, Z88DK_TOOL, { version: "latest" })
 ];
 var ServerBuildEnv = class {
   constructor(rootdir, sessionID, tool) {

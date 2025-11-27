@@ -153,6 +153,7 @@ const TOOL_TO_SOURCE_STYLE = {
     'armtcc': 'text/x-csrc',
     'oscar64': 'text/x-csrc',
     'bbcbasic': 'basic',
+    'zxbasic': 'basic',
 };
 // TODO: move into tool class
 const TOOL_TO_HELPURL = {

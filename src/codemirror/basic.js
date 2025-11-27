@@ -39,7 +39,15 @@ CodeMirror.defineMode("basic", function(conf, parserConf) {
         'RANDOMIZE','READ','REM','RESTORE','RETURN','STEP','STOP','SUB',
         'CALL','CHANGE','CONVERT','CLEAR','DIALECT','SELECT','CASE',
         // BBC BASIC oriented tokens (approximate highlighting)
-        'MODE','COLOUR','VDU','PROC','REPEAT','UNTIL','TRACE','ENVELOPE','SOUND','CLS','CLG','GCOL','MOVE','DRAW','PLOT','PAGE','PTR','TIME','ERROR','LOCAL'
+        'MODE','COLOUR','VDU','PROC','REPEAT','UNTIL','TRACE','ENVELOPE','SOUND','CLS','CLG','GCOL','MOVE','DRAW','PLOT','PAGE','PTR','TIME','ERROR','LOCAL',
+        // ZX Spectrum BASIC keywords
+        'BORDER','PAPER','INK','BRIGHT','FLASH','INVERSE','OVER','AT','TAB','BEEP',
+        'POKE','PEEK','USR','LOAD','SAVE','VERIFY','MERGE','NEW','RUN','LIST','LLIST',
+        'CIRCLE','PLOT','DRAW','CONT','PAUSE','SCREEN','CLS','COPY','LPRINT','LLIST',
+        'FOR','NEXT','IF','THEN','ELSE','END','WHILE','WEND','DO','LOOP','UNTIL',
+        'FN','DEF','FN','OPEN','CLOSE','LINE','CAT','ERASE','FORMAT','MOVE',
+        'VAL','VAL$','STR$','CHR$','CODE','LEN','SGN','ABS','INT','SQR','SIN','COS','TAN','ASN','ACS','ATN','LN','EXP',
+        'RND','INKEY$','PI','PEEK','IN','OUT','RESTORE','RANDOMIZE'
     ];
     var commontypes = ['xxxxbyte','xxxxword'];
 

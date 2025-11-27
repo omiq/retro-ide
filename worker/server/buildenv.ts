@@ -189,6 +189,44 @@ async function oscar64ProcessOutput(step: WorkerBuildStep, outpath: string): Pro
     return { output, listings, symbolmap, segments, debuginfo };
 }
 
+async function z88dkProcessErrors(step: WorkerBuildStep, errorData: string): Promise<WorkerErrorResult> {
+    let errors = [];
+    // z88dk error format: filename:line:error message
+    // Example: main.c:5:error: syntax error
+    let errorMatcher = makeErrorMatcher(errors, /([^:]+):(\d+):\s*(.+)/, 2, 3, step.path, 1);
+    for (let line of errorData.split('\n')) {
+        errorMatcher(line);
+    }
+    return { errors };
+}
+
+const Z88DK_TOOL: ServerBuildTool = {
+    name: 'z88dk',
+    version: '',
+    extensions: ['.c', '.C'],
+    archs: ['z80'],
+    platforms: ['zxspectrum'],
+    processOutput: basicProcessOutput,
+    processErrors: z88dkProcessErrors,
+    platform_configs: {
+        default: {
+            // z88dk is installed at /snap/bin/zcc, use full path
+            command: '/snap/bin/zcc',
+            // +zx = ZX Spectrum target
+            // -startup=1 = use startup code
+            // -clib=sdcc_iy = use SDCC library with IY register
+            // -create-app = create a TAP file directly
+            // -O3 = optimize level 3
+            args: ['+zx', '-startup=1', '-clib=sdcc_iy', '-O3', '-create-app', '-o', '$OUTFILE', '$INFILES'],
+            outfile: 'a.tap',
+        },
+        zxspectrum: {
+            // ZX Spectrum specific config (same as default for now)
+            outfile: 'a.tap',
+        }
+    }
+}
+
 export function findBestTool(step: BuildStep) {
     if (!step?.tool) throw new Error('No tool specified');
     const [name, version] = step.tool.split('@');
@@ -203,6 +241,7 @@ export function findBestTool(step: BuildStep) {
 export const TOOLS: ServerBuildTool[] = [
     Object.assign({}, LLVM_MOS_TOOL, { version: 'latest' }),
     Object.assign({}, OSCAR64_TOOL, { version: 'latest' }),
+    Object.assign({}, Z88DK_TOOL, { version: 'latest' }),
 ];
 
 

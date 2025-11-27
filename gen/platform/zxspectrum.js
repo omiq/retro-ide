@@ -12,6 +12,8 @@ class ZXSpectrumPlatform {
         this.currentModel = '48k';
         this.pauseResumeSupported = true; // qaop supports pause/resume
         this.blobUrls = []; // Keep blob URLs alive
+        this.originalBinary = null; // Store original compiled binary for download
+        this.originalFilename = null; // Store original filename for download
         this.mainElement = mainElement;
         // Listen for messages from the iframe
         window.addEventListener('message', (event) => {
@@ -45,9 +47,14 @@ class ZXSpectrumPlatform {
         this.mainElement.innerHTML = '';
         this.mainElement.appendChild(this.iframe);
         // Load qaop emulator
+        // Get model parameter from URL (default to 48k)
+        const urlParams = new URLSearchParams(window.location.search);
+        const modelParam = urlParams.get('model') || '48k';
+        this.currentModel = (modelParam === '128k') ? '128k' : '48k';
         const cacheBuster = `?t=${Date.now()}`;
-        this.iframe.src = `zxspectrum-iframe.html${cacheBuster}`;
-        console.log("ZXSpectrumPlatform: iframe created and qaop loading");
+        const modelQuery = `&model=${encodeURIComponent(this.currentModel)}`;
+        this.iframe.src = `zxspectrum-iframe.html${cacheBuster}${modelQuery}`;
+        console.log("ZXSpectrumPlatform: iframe created and qaop loading, model:", this.currentModel);
         // Set up compilation listener
         this.setupCompilationListener();
         // Update control buttons
@@ -73,7 +80,11 @@ class ZXSpectrumPlatform {
         const lowerFilename = filename.toLowerCase();
         if (lowerFilename.endsWith('.bas'))
             return 'zxbasic'; // Use ZX Spectrum BASIC compiler
-        // For Z80 assembly and C, use the standard Z80 toolchain
+        // For C files, use z88dk (which can create .tap files directly)
+        if (lowerFilename.endsWith('.c') || lowerFilename.endsWith('.h')) {
+            return 'z88dk'; // Use z88dk PHP API
+        }
+        // For Z80 assembly, use the standard Z80 toolchain
         return (0, baseplatform_1.getToolForFilename_z80)(filename);
     }
     getDefaultExtension() {
@@ -106,11 +117,47 @@ class ZXSpectrumPlatform {
         }
     }
     loadROM(title, rom) {
-        var _a, _b, _c, _d, _e, _f, _g, _h;
-        console.log("ZXSpectrumPlatform loadROM called with title:", title, "rom type:", typeof rom);
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+        console.log("ZXSpectrumPlatform loadROM called with title:", title, "rom type:", typeof rom, "rom length:", rom instanceof Uint8Array ? rom.length : 'N/A');
         if (!this.iframe) {
             console.error("ZXSpectrumPlatform: iframe not ready");
             return;
+        }
+        // Store original binary for download (before any transformations)
+        if (rom instanceof Uint8Array) {
+            // Trim trailing zeros to get actual code size
+            let actualSize = rom.length;
+            for (let i = rom.length - 1; i >= 0; i--) {
+                if (rom[i] !== 0) {
+                    actualSize = i + 1;
+                    break;
+                }
+            }
+            if (actualSize < rom.length) {
+                console.log(`ZXSpectrumPlatform: Trimming binary from ${rom.length} to ${actualSize} bytes (removed ${rom.length - actualSize} trailing zeros)`);
+                this.originalBinary = rom.slice(0, actualSize);
+            }
+            else {
+                this.originalBinary = new Uint8Array(rom); // Make a copy
+            }
+            console.log("ZXSpectrumPlatform: Stored original binary for download:", this.originalBinary.length, "bytes");
+        }
+        else {
+            this.originalBinary = null;
+        }
+        // Get filename for download
+        const getCurrentMainFilename = (_a = window.IDE) === null || _a === void 0 ? void 0 : _a.getCurrentMainFilename;
+        if (getCurrentMainFilename) {
+            this.originalFilename = getCurrentMainFilename();
+        }
+        else {
+            const currentProject = (_b = window.IDE) === null || _b === void 0 ? void 0 : _b.current_project;
+            if (currentProject && currentProject.mainPath) {
+                this.originalFilename = currentProject.mainPath;
+            }
+            else {
+                this.originalFilename = title;
+            }
         }
         // Handle BASIC AST output - convert back to plain text
         let dataToLoad;
@@ -119,21 +166,20 @@ class ZXSpectrumPlatform {
             console.log("ZXSpectrumPlatform: Detected BASIC AST, getting source file");
             // Get the actual filename using multiple methods
             let filename = null;
-            // Method 1: Try getCurrentMainFilename function
-            const getCurrentMainFilename = (_a = window.IDE) === null || _a === void 0 ? void 0 : _a.getCurrentMainFilename;
+            // Method 1: Try getCurrentMainFilename function (reuse the one above)
             if (getCurrentMainFilename) {
                 filename = getCurrentMainFilename();
             }
             // Method 2: Try current_project.mainPath directly
             if (!filename) {
-                const currentProject = (_b = window.IDE) === null || _b === void 0 ? void 0 : _b.current_project;
+                const currentProject = (_c = window.IDE) === null || _c === void 0 ? void 0 : _c.current_project;
                 if (currentProject && currentProject.mainPath) {
                     filename = currentProject.mainPath;
                 }
             }
             // Method 3: Try getCurrentProject().mainPath
             if (!filename) {
-                const getCurrentProject = (_c = window.IDE) === null || _c === void 0 ? void 0 : _c.getCurrentProject;
+                const getCurrentProject = (_d = window.IDE) === null || _d === void 0 ? void 0 : _d.getCurrentProject;
                 if (getCurrentProject) {
                     const project = getCurrentProject();
                     if (project && project.mainPath) {
@@ -161,14 +207,14 @@ class ZXSpectrumPlatform {
             }
             // Fallback: try IDE current_project directly
             if (!sourceText) {
-                const currentProject = (_d = window.IDE) === null || _d === void 0 ? void 0 : _d.current_project;
+                const currentProject = (_e = window.IDE) === null || _e === void 0 ? void 0 : _e.current_project;
                 if (currentProject && currentProject.filedata && filename) {
                     sourceText = currentProject.filedata[filename];
                 }
             }
             // Fallback: try getCurrentProject
             if (!sourceText) {
-                const getCurrentProject = (_e = window.IDE) === null || _e === void 0 ? void 0 : _e.getCurrentProject;
+                const getCurrentProject = (_f = window.IDE) === null || _f === void 0 ? void 0 : _f.getCurrentProject;
                 if (getCurrentProject) {
                     const project = getCurrentProject();
                     if (project && project.filedata && filename) {
@@ -187,8 +233,15 @@ class ZXSpectrumPlatform {
             }
         }
         else if (rom instanceof Uint8Array) {
-            dataToLoad = rom;
-            console.log("ZXSpectrumPlatform: Using binary data,", dataToLoad.length, "bytes");
+            // Use the trimmed version if we have it, otherwise trim now
+            if (this.originalBinary && this.originalBinary.length < rom.length) {
+                dataToLoad = this.originalBinary;
+                console.log("ZXSpectrumPlatform: Using trimmed binary data,", dataToLoad.length, "bytes (original was", rom.length, "bytes)");
+            }
+            else {
+                dataToLoad = rom;
+                console.log("ZXSpectrumPlatform: Using binary data,", dataToLoad.length, "bytes");
+            }
         }
         else {
             console.error("ZXSpectrumPlatform: Unexpected rom type:", typeof rom);
@@ -202,9 +255,8 @@ class ZXSpectrumPlatform {
         // - application/x.zx.z80 for Z80 snapshots
         // - image/x.zx.scr for screens
         // Detect file type from data or filename
-        // Get filename to help with detection
+        // Get filename to help with detection (reuse getCurrentMainFilename from above)
         let filename = null;
-        const getCurrentMainFilename = (_f = window.IDE) === null || _f === void 0 ? void 0 : _f.getCurrentMainFilename;
         if (getCurrentMainFilename) {
             filename = getCurrentMainFilename();
         }
@@ -217,8 +269,10 @@ class ZXSpectrumPlatform {
         let contentType = 'application/x.zx.tap'; // Default to TAP
         if (dataToLoad.length > 0) {
             // Check for TAP file (starts with 0x13 for header block)
+            // z88dk outputs .tap files directly, so if it's already a TAP file, use it as-is
             if (dataToLoad[0] === 0x13) {
                 contentType = 'application/x.zx.tap';
+                console.log("ZXSpectrumPlatform: TAP file detected (likely from z88dk), using as-is");
             }
             // Check for Z80 snapshot (starts with 0x03 0x00)
             else if (dataToLoad.length > 30 && dataToLoad[0] === 0x03 && dataToLoad[1] === 0x00) {
@@ -228,18 +282,19 @@ class ZXSpectrumPlatform {
             else if (dataToLoad.length > 27 && dataToLoad[0] === 0x3F) {
                 contentType = 'application/x.zx.sna';
             }
-            // Check if this is a compiled C binary (not a TAP file)
-            // For C programs, create a Z80 snapshot with the program loaded at 0x8000 and PC set to 0x8000
-            // This will auto-execute when loaded, unlike TAP files which require RANDOMIZE USR
+            // If it's not a recognized format and it's a C file, z88dk should have output a TAP file
+            // But if we get here, it might be a raw binary - check if we should wrap it
             else if (filename && (filename.endsWith('.c') || filename.endsWith('.C'))) {
-                // Convert binary to Z80 snapshot format
-                dataToLoad = this.createZ80Snapshot(dataToLoad, 0x8000); // code_start is 0x8000
-                contentType = 'application/x.zx.z80';
+                // z88dk should output .tap files, but if we get a raw binary, wrap it in TAP CODE block
+                console.log("ZXSpectrumPlatform: C program binary detected (not TAP), wrapping in CODE block");
+                const baseFilename = ((_h = filename.split('/').pop()) === null || _h === void 0 ? void 0 : _h.replace(/\.[^.]*$/, '')) || 'PROGRAM';
+                dataToLoad = this.createCodeTAPFile(dataToLoad, baseFilename, 0x8000);
+                contentType = 'application/x.zx.tap';
             }
             // If it's a large binary file (> 1KB) and doesn't match other formats, wrap as CODE
             else if (dataToLoad.length > 1024) {
                 // Assume it's a compiled binary, wrap in TAP with CODE block
-                const baseFilename = filename ? ((_h = filename.split('/').pop()) === null || _h === void 0 ? void 0 : _h.replace(/\.[^.]*$/, '')) || 'PROGRAM' : 'PROGRAM';
+                const baseFilename = filename ? ((_j = filename.split('/').pop()) === null || _j === void 0 ? void 0 : _j.replace(/\.[^.]*$/, '')) || 'PROGRAM' : 'PROGRAM';
                 dataToLoad = this.createCodeTAPFile(dataToLoad, baseFilename, 0x8000);
                 contentType = 'application/x.zx.tap';
             }
@@ -266,22 +321,20 @@ class ZXSpectrumPlatform {
         // The iframe wrapper will handle loading into qaop via URL hash
         // We need to wait a bit for the iframe to be ready
         const sendLoad = () => {
-            var _a, _b;
+            var _a;
             if (this.iframe && this.iframe.contentWindow) {
-                // Get filename for CODE block detection
+                // Get filename for CODE block detection (reuse filename from above)
                 let detectedFilename = filename;
-                if (!detectedFilename) {
-                    const getCurrentMainFilename = (_a = window.IDE) === null || _a === void 0 ? void 0 : _a.getCurrentMainFilename;
-                    if (getCurrentMainFilename) {
-                        detectedFilename = getCurrentMainFilename();
-                    }
+                if (!detectedFilename && getCurrentMainFilename) {
+                    detectedFilename = getCurrentMainFilename();
                 }
                 if (!detectedFilename) {
-                    const currentProject = (_b = window.IDE) === null || _b === void 0 ? void 0 : _b.current_project;
+                    const currentProject = (_a = window.IDE) === null || _a === void 0 ? void 0 : _a.current_project;
                     if (currentProject && currentProject.mainPath) {
                         detectedFilename = currentProject.mainPath;
                     }
                 }
+                console.log("ZXSpectrumPlatform: Sending load command, filename:", detectedFilename, "contentType:", contentType);
                 this.iframe.contentWindow.postMessage({
                     cmd: 'load',
                     url: dataUrl,
@@ -309,12 +362,12 @@ class ZXSpectrumPlatform {
         if (rom && rom.length > 30 && rom[0] === 0x03 && rom[1] === 0x00) {
             return '.z80';
         }
-        // For compiled C binaries, return .tap (they get wrapped in TAP for loading)
+        // For compiled C binaries, return .bin (they are raw binaries)
         // Check filename to determine if it's a C file
         let filename = null;
-        const getCurrentMainFilename = (_a = window.IDE) === null || _a === void 0 ? void 0 : _a.getCurrentMainFilename;
-        if (getCurrentMainFilename) {
-            filename = getCurrentMainFilename();
+        const getCurrentMainFilenameFn = (_a = window.IDE) === null || _a === void 0 ? void 0 : _a.getCurrentMainFilename;
+        if (getCurrentMainFilenameFn) {
+            filename = getCurrentMainFilenameFn();
         }
         if (!filename) {
             const currentProject = (_b = window.IDE) === null || _b === void 0 ? void 0 : _b.current_project;
@@ -430,6 +483,38 @@ class ZXSpectrumPlatform {
             resumeButton.style.display = this.pauseResumeSupported ? '' : 'none';
         }
     }
+    getDownloadFile() {
+        // Return the original compiled binary (not the Z80 snapshot)
+        if (this.originalBinary) {
+            console.log("ZXSpectrumPlatform: getDownloadFile() called, returning original binary:", this.originalBinary.length, "bytes");
+            // Determine extension based on filename
+            let extension = '.bin'; // Default
+            if (this.originalFilename) {
+                const lowerFilename = this.originalFilename.toLowerCase();
+                if (lowerFilename.endsWith('.bas')) {
+                    extension = '.tap'; // BASIC programs are tokenized to TAP
+                }
+                else if (lowerFilename.endsWith('.c')) {
+                    extension = '.bin'; // C programs are raw binaries
+                }
+                else {
+                    // Use getROMExtension to determine based on content
+                    extension = this.getROMExtension(this.originalBinary);
+                }
+            }
+            else {
+                // Fallback: check content
+                extension = this.getROMExtension(this.originalBinary);
+            }
+            const blob = new Blob([this.originalBinary], { type: "application/octet-stream" });
+            return {
+                extension: extension,
+                blob: blob
+            };
+        }
+        console.log("ZXSpectrumPlatform: getDownloadFile() called, but no original binary available");
+        return undefined;
+    }
     // Optional methods that may be called by the IDE
     loadState(state) {
         // qaop supports state saving/loading but we'd need to implement this
@@ -458,7 +543,9 @@ class ZXSpectrumPlatform {
         header[5] = 0x00; // HL high
         header[6] = 0x00; // PC low (0 = extended header format)
         header[7] = 0x00; // PC high (0 = extended header format)
-        header[8] = 0xFF; // SP low (stack pointer at 0xFF00)
+        // Stack pointer: ZX Spectrum typically uses 0xFF58 or higher
+        // But we'll use 0xFF00 which should be safe
+        header[8] = 0x00; // SP low (stack pointer at 0xFF00)
         header[9] = 0xFF; // SP high
         header[10] = 0x00; // I (interrupt register)
         header[11] = 0x00; // R (refresh register)
@@ -467,7 +554,8 @@ class ZXSpectrumPlatform {
         // Bit 1-3: Border color (0-7)
         // Bit 4: SamRom
         // Bit 5: Compressed (1 = compressed, 0 = uncompressed)
-        header[12] = 0x20; // Set bit 5 for compressed data
+        // Try uncompressed first to avoid compression bugs
+        header[12] = 0x00; // Uncompressed data (bit 5 = 0)
         // DE register
         header[13] = 0x00; // DE low
         header[14] = 0x00; // DE high
@@ -481,8 +569,9 @@ class ZXSpectrumPlatform {
         header[21] = 0x00; // A'
         header[22] = 0x00; // F'
         // IY and IX
-        header[23] = 0x00; // IY low
-        header[24] = 0x00; // IY high
+        // IY must point to system variables area (0x5C3A) for ZX Spectrum BASIC system calls
+        header[23] = 0x3A; // IY low (0x5C3A = system variables)
+        header[24] = 0x5C; // IY high
         header[25] = 0x00; // IX low
         header[26] = 0x00; // IX high
         // Interrupt flags
@@ -541,17 +630,19 @@ class ZXSpectrumPlatform {
         // Block 2: 0xC000-0xFFFF (offset 32768-49151 in ram array)
         // Compression flag is already set in header[12] above (bit 5 = 0x20)
         const blocks = [];
-        // Save each RAM block with compression
+        // Save each RAM block (uncompressed for now to avoid compression bugs)
         for (let blockNum = 0; blockNum < 3; blockNum++) {
             const blockStart = blockNum * 16384;
             const blockEnd = blockStart + 16384;
             const blockData = ram.slice(blockStart, blockEnd);
-            const compressed = this.compressZ80RAM(blockData);
-            // Each block is prefixed with its length (2 bytes, little-endian)
-            const blockWithLength = new Uint8Array(2 + compressed.length);
-            blockWithLength[0] = compressed.length & 0xFF;
-            blockWithLength[1] = (compressed.length >> 8) & 0xFF;
-            blockWithLength.set(compressed, 2);
+            // For uncompressed format, the block length is 0xFFFF (65535) followed by the data
+            // But actually, uncompressed blocks are just the raw data prefixed with length
+            // Length should be 0x4000 (16384) for uncompressed blocks
+            const blockLength = blockData.length; // 16384
+            const blockWithLength = new Uint8Array(2 + blockLength);
+            blockWithLength[0] = blockLength & 0xFF;
+            blockWithLength[1] = (blockLength >> 8) & 0xFF;
+            blockWithLength.set(blockData, 2);
             blocks.push(blockWithLength);
         }
         // Calculate total size: header (30) + extended header length prefix (2) + extended header data (23) + RAM blocks
