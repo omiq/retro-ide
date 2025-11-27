@@ -251,8 +251,10 @@ function compileC($source, $sessionID) {
         $cmd = sprintf('cd %s && ', escapeshellarg($zccBaseDir));
     }
     
+
+    // correct command is zcc +zx -lndos -create-app -o outout.tap input.c
     $cmd .= sprintf(
-        '%s%s +zx -startup=1 -clib=sdcc_iy -O3 -create-app -o %s %s 2>&1',
+        '%s%s +zx -lndos -create-app -o %s %s 2>&1',
         $envString,
         escapeshellarg($zccPath),
         escapeshellarg($tempOut),
