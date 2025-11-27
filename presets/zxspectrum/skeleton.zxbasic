@@ -1,0 +1,11 @@
+10 REM ZX Spectrum BASIC Program
+20 REM ========================
+30 PRINT "Hello from ZX Spectrum BASIC!"
+40 PRINT
+50 PRINT "This is a BASIC template"
+60 PRINT "Edit this file to get started"
+70 PRINT
+80 PRINT "Press any key to continue..."
+90 PAUSE 0
+100 PRINT "Enjoy ZX Spectrum BASIC!"
+

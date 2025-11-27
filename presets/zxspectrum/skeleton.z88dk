@@ -1,0 +1,21 @@
+// ZX Spectrum C Program
+// Using z88dk compiler
+
+#include <stdio.h>
+
+void main() {
+    // Clear screen
+    printf("\x0c");  // Form feed (clear screen)
+    
+    printf("Hello from ZX Spectrum C!\n");
+    printf("\n");
+    printf("This is a C template\n");
+    printf("Edit this file to get started\n");
+    printf("\n");
+    
+    // Simple loop
+    while(1) {
+        // Your code here
+    }
+}
+
