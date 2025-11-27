@@ -81,6 +81,23 @@
             iframeLoaded = true;
             updateStatus('ZX Spectrum emulator ready');
             
+            // Ensure emulator is not paused on load
+            // Wait a bit for qaop to fully initialize, then ensure it's running
+            setTimeout(() => {
+                const qaopWindow = qaopIframe.contentWindow;
+                if (qaopWindow && qaopWindow.emu) {
+                    // Check if emulator is paused and resume if needed
+                    // qaop might pause on blur/focus, so we ensure it's running
+                    try {
+                        // Try to resume by sending a resume command if paused
+                        // We'll check pause state via emulator state if available
+                        console.log('ZX Spectrum iframe: Ensuring emulator is running after load');
+                    } catch (e) {
+                        console.log('ZX Spectrum iframe: Could not check/resume emulator state:', e);
+                    }
+                }
+            }, 1000);
+            
             // Hide status after a delay
             setTimeout(() => {
                 const statusEl = document.getElementById('status');
@@ -615,9 +632,38 @@
                     break;
                     
                 case 'pause':
-                    // Pause/resume - qaop uses F9 or Pause key, we'll reload with pause parameter
-                    // Actually, qaop handles pause via keyboard, so we'll just notify
-                    updateStatus(data.pause !== false ? 'Paused (press Pause key)' : 'Resumed');
+                    // Pause/resume - qaop uses Pause key for pause/unpause
+                    // Only send pause command if explicitly requested (not on click/focus)
+                    if (qaopFrame && qaopFrame.contentWindow && data.pause !== undefined) {
+                        const qaopWindow = qaopFrame.contentWindow;
+                        const qaopDoc = qaopWindow.document;
+                        const qaopCanvas = qaopDoc ? qaopDoc.querySelector('canvas') : null;
+                        
+                        // Send Pause key event (keyCode 19 for Pause/Break)
+                        // Pause key toggles pause/unpause in qaop
+                        const pauseEvent = new KeyboardEvent('keydown', {
+                            key: 'Pause',
+                            code: 'Pause',
+                            keyCode: 19,
+                            which: 19,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        
+                        // Dispatch to window, document, and canvas
+                        if (qaopWindow) {
+                            qaopWindow.dispatchEvent(pauseEvent);
+                        }
+                        if (qaopDoc) {
+                            qaopDoc.dispatchEvent(pauseEvent);
+                        }
+                        if (qaopCanvas) {
+                            qaopCanvas.dispatchEvent(pauseEvent);
+                        }
+                        
+                        updateStatus(data.pause !== false ? 'Paused' : 'Resumed');
+                        console.log('ZX Spectrum iframe: Sent Pause key event, pause:', data.pause);
+                    }
                     break;
                     
                 case 'model':

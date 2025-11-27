@@ -5,12 +5,14 @@ const baseplatform_1 = require("../common/baseplatform");
 const emu_1 = require("../common/emu");
 const ZXSPECTRUM_PRESETS = [
     { id: 'hello.bas', name: 'Hello World (BASIC)', category: 'BASIC' },
+    { id: 'hello.c', name: 'Hello World (C)', category: 'C' },
 ];
 class ZXSpectrumPlatform {
     constructor(mainElement) {
         this.iframe = null;
         this.currentModel = '48k';
         this.pauseResumeSupported = true; // qaop supports pause/resume
+        this.isPaused = false; // Track pause state for icon toggle
         this.blobUrls = []; // Keep blob URLs alive
         this.originalBinary = null; // Store original compiled binary for download
         this.originalFilename = null; // Store original filename for download
@@ -37,10 +39,18 @@ class ZXSpectrumPlatform {
         this.iframe.style.backgroundColor = '#000';
         this.iframe.setAttribute('tabindex', '-1');
         // Prevent the IDE from pausing when clicking on the iframe
+        // Also prevent focus events that might trigger pause in qaop
         this.iframe.addEventListener('focus', (e) => {
             e.stopPropagation();
+            e.preventDefault();
         }, true);
         this.iframe.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Don't prevent default on click - we want clicks to work for keyboard input
+            // But stop propagation so IDE doesn't handle it
+        }, true);
+        // Prevent blur events that might pause qaop
+        this.iframe.addEventListener('blur', (e) => {
             e.stopPropagation();
         }, true);
         // Add iframe to the main element
@@ -57,8 +67,11 @@ class ZXSpectrumPlatform {
         console.log("ZXSpectrumPlatform: iframe created and qaop loading, model:", this.currentModel);
         // Set up compilation listener
         this.setupCompilationListener();
-        // Update control buttons
-        this.updateControlButtons();
+        // Update control buttons (hide resume button, show pause/reset)
+        // Use setTimeout to ensure buttons exist in DOM
+        setTimeout(() => {
+            this.updateControlButtons();
+        }, 100);
     }
     stop() {
         console.log("ZXSpectrumPlatform stop() called");
@@ -66,10 +79,17 @@ class ZXSpectrumPlatform {
     }
     reset() {
         console.log("ZXSpectrumPlatform reset() called");
-        if (this.iframe && this.iframe.contentWindow) {
-            // Send reset command via postMessage to iframe wrapper
-            this.iframe.contentWindow.postMessage({ cmd: 'reset' }, '*');
-            console.log("ZXSpectrumPlatform: Sent reset command to iframe");
+        // Reload the iframe to reset the emulator (like x86dosbox and apple2e)
+        if (this.iframe) {
+            // Reload the iframe with a cache buster to force a fresh load
+            const currentSrc = this.iframe.src.split('?')[0]; // Get base URL without params
+            const cacheBuster = `?t=${Date.now()}`;
+            const modelQuery = `&model=${encodeURIComponent(this.currentModel)}`;
+            this.iframe.src = currentSrc + cacheBuster + modelQuery;
+            console.log("ZXSpectrumPlatform: Reloaded iframe for reset");
+            // Reset pause state
+            this.isPaused = false;
+            this.updatePauseButtonIcon();
         }
     }
     isRunning() {
@@ -98,22 +118,40 @@ class ZXSpectrumPlatform {
             console.log("ZXSpectrumPlatform: Pause not supported");
             return;
         }
-        console.log("ZXSpectrumPlatform pause() called");
+        // Toggle pause state - pause button acts as both pause and play
+        this.isPaused = !this.isPaused;
+        console.log("ZXSpectrumPlatform pause() called, isPaused:", this.isPaused);
         if (this.iframe && this.iframe.contentWindow) {
-            // qaop uses keyboard for pause, but we can try postMessage
-            this.iframe.contentWindow.postMessage({ cmd: 'pause', pause: true }, '*');
-            console.log("ZXSpectrumPlatform: Sent pause command to iframe");
+            // Send pause command - Pause key toggles in qaop
+            this.iframe.contentWindow.postMessage({ cmd: 'pause', pause: this.isPaused }, '*');
+            console.log("ZXSpectrumPlatform: Sent pause toggle command to iframe, paused:", this.isPaused);
         }
+        // Update button icon
+        this.updatePauseButtonIcon();
     }
     resume() {
-        if (!this.pauseResumeSupported) {
-            console.log("ZXSpectrumPlatform: Resume not supported");
-            return;
-        }
-        console.log("ZXSpectrumPlatform resume() called");
-        if (this.iframe && this.iframe.contentWindow) {
-            this.iframe.contentWindow.postMessage({ cmd: 'pause', pause: false }, '*');
-            console.log("ZXSpectrumPlatform: Sent resume command to iframe");
+        // For ZX Spectrum, resume is the same as pause (toggle)
+        // This is called by the IDE's resume button, but we hide that button
+        // and use pause() for toggling instead
+        this.pause();
+    }
+    updatePauseButtonIcon() {
+        const pauseButton = document.getElementById('dbg_pause');
+        if (pauseButton) {
+            const icon = pauseButton.querySelector('.glyphicon');
+            if (icon) {
+                // Toggle between pause and play icons
+                if (this.isPaused) {
+                    icon.classList.remove('glyphicon-pause');
+                    icon.classList.add('glyphicon-play');
+                    pauseButton.title = 'Resume';
+                }
+                else {
+                    icon.classList.remove('glyphicon-play');
+                    icon.classList.add('glyphicon-pause');
+                    pauseButton.title = 'Pause';
+                }
+            }
         }
     }
     loadROM(title, rom) {
@@ -473,14 +511,27 @@ class ZXSpectrumPlatform {
     }
     updateControlButtons() {
         // Update UI control buttons visibility based on capabilities
-        // This would typically update buttons in the IDE UI
-        const pauseButton = document.querySelector('[data-action="pause"]');
-        const resumeButton = document.querySelector('[data-action="resume"]');
-        if (pauseButton) {
-            pauseButton.style.display = this.pauseResumeSupported ? '' : 'none';
+        const resetButton = document.getElementById('dbg_reset');
+        const pauseButton = document.getElementById('dbg_pause');
+        const resumeButton = document.getElementById('dbg_go');
+        if (resetButton) {
+            resetButton.style.display = 'inline-block';
+            console.log("ZXSpectrumPlatform: Reset button visible");
         }
+        if (pauseButton) {
+            pauseButton.style.display = this.pauseResumeSupported ? 'inline-block' : 'none';
+            console.log("ZXSpectrumPlatform: Pause button visibility:", this.pauseResumeSupported ? 'visible' : 'hidden');
+            // Update icon based on current state
+            this.updatePauseButtonIcon();
+        }
+        // Hide resume button for ZX Spectrum - pause button toggles instead
+        // Hide it completely so it doesn't take up space or interfere
         if (resumeButton) {
-            resumeButton.style.display = this.pauseResumeSupported ? '' : 'none';
+            resumeButton.style.display = 'none';
+            resumeButton.style.visibility = 'hidden';
+            resumeButton.style.position = 'absolute';
+            resumeButton.style.left = '-9999px';
+            console.log("ZXSpectrumPlatform: Resume button hidden (pause button toggles)");
         }
     }
     getDownloadFile() {
@@ -506,7 +557,9 @@ class ZXSpectrumPlatform {
                 // Fallback: check content
                 extension = this.getROMExtension(this.originalBinary);
             }
-            const blob = new Blob([this.originalBinary], { type: "application/octet-stream" });
+            // Create a new Uint8Array to ensure proper type for Blob
+            const binaryArray = new Uint8Array(this.originalBinary);
+            const blob = new Blob([binaryArray], { type: "application/octet-stream" });
             return {
                 extension: extension,
                 blob: blob

@@ -163,6 +163,7 @@ const TOOL_TO_SOURCE_STYLE = {
   'oscar64': 'text/x-csrc',
   'bbcbasic': 'basic',
   'zxbasic': 'basic',
+  'z88dk': 'text/x-csrc', // z88dk C compiler for ZX Spectrum
 }
 
 // TODO: move into tool class
@@ -1105,8 +1106,9 @@ export function setupBreakpoint(btnid? : DebugCommandType) {
 }
 
 function _pause() {
-  // Don't pause VIC-20 or ZX Spectrum - they handle their own pause/resume in the iframe
-  if (platform_id === 'vic20' || platform_id === 'zxspectrum') {
+  // Don't pause VIC-20 - it handles its own pause/resume in the iframe
+  // ZX Spectrum now supports pause/resume via keyboard events
+  if (platform_id === 'vic20') {
     return;
   }
   if (platform && platform.isRunning()) {
@@ -1119,12 +1121,21 @@ function _pause() {
 function pause() {
   if (!checkRunReady()) return;
   clearBreakpoint();
-  // For VIC-20, send pause command directly to iframe (bypass _pause which is disabled for VIC-20)
+  // For VIC-20, send pause command directly to iframe
   if (platform_id === 'vic20' && platform) {
     platform.pause();
     console.log("Paused");
     userPaused = true;
     setDebugButtonState("pause", "stopped");
+    return;
+  }
+  // For ZX Spectrum, pause() toggles and handles its own icon updates
+  if (platform_id === 'zxspectrum' && platform) {
+    const zxPlatform = platform as any; // Access private isPaused state
+    platform.pause();
+    // Update userPaused to match platform's internal state
+    userPaused = zxPlatform.isPaused !== undefined ? zxPlatform.isPaused : !userPaused;
+    // Don't set button state - platform handles icon toggle
     return;
   }
   _pause();
@@ -1868,6 +1879,10 @@ function replaceURLState() {
 function addPageFocusHandlers() {
   var hidden = false;
   document.addEventListener("visibilitychange", () => {
+    // Don't auto-pause ZX Spectrum on visibility change - it handles its own pause/resume
+    if (platform_id === 'zxspectrum') {
+      return;
+    }
     if (document.visibilityState == 'hidden' && platform && platform.isRunning()) {
       _pause();
       hidden = true;
@@ -1883,6 +1898,10 @@ function addPageFocusHandlers() {
     }
   });
   $(window).on("blur", () => {
+    // Don't auto-pause ZX Spectrum on blur - it handles its own pause/resume
+    if (platform_id === 'zxspectrum') {
+      return;
+    }
     if (platform && platform.isRunning()) {
       _pause();
       hidden = true;
@@ -1901,7 +1920,7 @@ function showInstructions() {
   if (vcanvas) {
     vcanvas.on('focus', () => {
       // Don't pause platforms in iframes when focusing - they handle their own events
-      if (platform_id === 'apple2e' || platform_id === 'vic20') {
+      if (platform_id === 'apple2e' || platform_id === 'vic20' || platform_id === 'zxspectrum') {
         // These platforms handle focus in the iframe, don't pause here
         return;
       }
