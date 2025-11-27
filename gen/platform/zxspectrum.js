@@ -5,6 +5,9 @@ const baseplatform_1 = require("../common/baseplatform");
 const emu_1 = require("../common/emu");
 const ZXSPECTRUM_PRESETS = [
     { id: 'hello.bas', name: 'Hello World (BASIC)', category: 'BASIC' },
+    { id: 'chars.bas', name: 'Character Set (BASIC)' },
+    { id: 'colours.bas', name: 'Colours (BASIC)' },
+    { id: 'measles.bas', name: 'Measles (BASIC)' },
     { id: 'hello.c', name: 'Hello World (C)', category: 'C' },
 ];
 class ZXSpectrumPlatform {
