@@ -48,7 +48,6 @@ echo json_encode($result);
 /**
  * Tokenize ZX Spectrum BASIC code using borial basic (zxbc.py)
  * This is faster than zmakebas as it compiles rather than just tokenizing
- * Falls back to zmakebas if zxbc.py is not available
  */
 function tokenizeBasic($basic, $sessionID) {
     // Create temp file paths
@@ -60,75 +59,69 @@ function tokenizeBasic($basic, $sessionID) {
         return ['errors' => [['line' => 0, 'msg' => "Failed to write temporary file: {$tempBas}", 'path' => '']]];
     }
     
-    // Find zxbc.py executable (borial basic)
+    // Use borial basic (zxbc.py) from /home/ide/zxbasic
     $zxbcPath = '/home/ide/zxbasic/zxbc.py';
-    if (!file_exists($zxbcPath)) {
-        // Try alternative locations
-        $zxbcPath = '/home/ide/zxbasic/zxbc.py';
-        if (!file_exists($zxbcPath)) {
-            // Try in PATH
-            $zxbcPath = 'zxbc.py';
+    
+    // Check if Python is available
+    $pythonPath = '/usr/bin/python3';
+    if (!file_exists($pythonPath)) {
+        $pythonPath = '/usr/bin/python';
+        if (!file_exists($pythonPath)) {
+            $pythonPath = 'python3';
         }
     }
     
-    // Check if zxbc.py exists and is executable
-    if (file_exists($zxbcPath) && is_readable($zxbcPath)) {
-        // Check if Python is available
-        $pythonPath = '/usr/bin/python3';
-        if (!file_exists($pythonPath)) {
-            $pythonPath = '/usr/bin/python';
-            if (!file_exists($pythonPath)) {
-                $pythonPath = 'python3';
-            }
-        }
-        
-        // Run zxbc.py: python3 zxbc.py -o output.tap input.bas -f tap --BASIC --autorun
-        $cmd = sprintf(
-            '%s %s -o %s %s -f tap --BASIC --autorun 2>&1',
-            escapeshellarg($pythonPath),
-            escapeshellarg($zxbcPath),
-            escapeshellarg($tempTap),
-            escapeshellarg($tempBas)
-        );
-        
-        exec($cmd, $output, $returnCode);
-        $errorOutput = implode("\n", $output);
-        
-        // Clean up temp BASIC file
-        if (file_exists($tempBas)) {
-            unlink($tempBas);
-        }
-        
-        if ($returnCode === 0 && file_exists($tempTap)) {
-            // Success - read TAP file
-            $tapData = file_get_contents($tempTap);
-            if ($tapData === false) {
-                // Clean up temp TAP file
-                if (file_exists($tempTap)) {
-                    unlink($tempTap);
-                }
-                return ['errors' => [['line' => 0, 'msg' => "Failed to read output file: {$tempTap}", 'path' => '']]];
-            }
-            
-            // Convert to base64
-            $outputBase64 = base64_encode($tapData);
-            
+    // Run zxbc.py: python3 zxbc.py -o output.tap input.bas -f tap --BASIC --autorun
+    $cmd = sprintf(
+        '%s %s -o %s %s -f tap --BASIC --autorun 2>&1',
+        escapeshellarg($pythonPath),
+        escapeshellarg($zxbcPath),
+        escapeshellarg($tempTap),
+        escapeshellarg($tempBas)
+    );
+    
+    exec($cmd, $output, $returnCode);
+    $errorOutput = implode("\n", $output);
+    
+    // Clean up temp BASIC file
+    if (file_exists($tempBas)) {
+        unlink($tempBas);
+    }
+    
+    if ($returnCode === 0 && file_exists($tempTap)) {
+        // Success - read TAP file
+        $tapData = file_get_contents($tempTap);
+        if ($tapData === false) {
             // Clean up temp TAP file
             if (file_exists($tempTap)) {
                 unlink($tempTap);
             }
-            
-            return [
-                'output' => $outputBase64
-            ];
-        } else {
-            // Error - parse error messages
-            $errors = parseZxbcErrors($errorOutput);
-            return ['errors' => $errors];
+            return ['errors' => [['line' => 0, 'msg' => "Failed to read output file: {$tempTap}", 'path' => '']]];
         }
+        
+        // Convert to base64
+        $outputBase64 = base64_encode($tapData);
+        
+        // Clean up temp TAP file
+        if (file_exists($tempTap)) {
+            unlink($tempTap);
+        }
+        
+        return [
+            'output' => $outputBase64
+        ];
     } else {
-        // zxbc.py not available, fall back to zmakebas
-        return tokenizeBasicZmakebas($basic, $sessionID);
+        // Error - parse error messages
+        $errors = parseZxbcErrors($errorOutput);
+        // If no errors parsed, include the full error output
+        if (empty($errors) && !empty(trim($errorOutput))) {
+            $errors[] = [
+                'line' => 0,
+                'msg' => "zxbc.py error: " . trim($errorOutput),
+                'path' => ''
+            ];
+        }
+        return ['errors' => $errors];
     }
 }
 
