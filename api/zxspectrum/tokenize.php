@@ -72,12 +72,32 @@ function tokenizeBasic($basic, $sessionID) {
         }
     }
     
-    // Run zxbc.py from its directory so imports work correctly
+    // Run zxbc.py from its directory with PYTHONPATH set so imports work correctly
+    // The src directory exists in /home/ide/zxbasic/src, so PYTHONPATH should include /home/ide/zxbasic
     // Change to zxbasic directory and run: python3 zxbc.py -o output.tap input.bas -f tap --BASIC --autorun
     // Use absolute paths for input/output files since we're changing directory
+    
+    // Set PYTHONPATH to include the zxbasic directory so Python can find the 'src' module
+    // Also set HOME to avoid issues with user-specific Python paths
+    $env = [
+        'PYTHONPATH' => $zxbcDir,
+        'PATH' => '/usr/local/bin:/usr/bin:/bin',
+        'HOME' => '/tmp'
+    ];
+    
+    // Build environment string for exec
+    $envString = '';
+    foreach ($env as $key => $value) {
+        $envString .= sprintf('%s=%s ', $key, escapeshellarg($value));
+    }
+    
+    // Run from zxbasic directory with PYTHONPATH set
+    // Use exec with environment array for better environment variable handling
+    // Change directory first, then run python with the script
     $cmd = sprintf(
-        'cd %s && %s zxbc.py -o %s %s -f tap --BASIC --autorun 2>&1',
+        'cd %s && %s%s zxbc.py -o %s %s -f tap --BASIC --autorun 2>&1',
         escapeshellarg($zxbcDir),
+        $envString,
         escapeshellarg($pythonPath),
         escapeshellarg($tempTap),
         escapeshellarg($tempBas)
