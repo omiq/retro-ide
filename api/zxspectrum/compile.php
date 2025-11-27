@@ -139,10 +139,27 @@ function compileC($source, $sessionID) {
     // Set environment variables for snap to work with www-data user
     // SNAP_USER_DATA tells snap where to store user data
     // ZCCCFG tells z88dk where to find its configuration files
+    // PATH must include the snap's bin directory so zcc can find z88dk-z80asm and other tools
+    $pathComponents = [
+        '/snap/bin',
+        '/usr/local/sbin',
+        '/usr/local/bin',
+        '/usr/sbin',
+        '/usr/bin',
+        '/sbin',
+        '/bin'
+    ];
+    
+    // If we found the snap base directory, add its bin directory to PATH
+    if ($zccBaseDir) {
+        // Add the snap's bin directory at the front of PATH
+        array_unshift($pathComponents, "$zccBaseDir/bin", "$zccBaseDir/usr/bin");
+    }
+    
     $env = [
         'SNAP_USER_DATA' => '/tmp/snap-www-data',
         'HOME' => '/tmp/snap-www-data',
-        'PATH' => '/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+        'PATH' => implode(':', $pathComponents)
     ];
     
     // If we found the snap base directory, set ZCCCFG to point to the config directory
