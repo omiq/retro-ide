@@ -60,7 +60,8 @@ function tokenizeBasic($basic, $sessionID) {
     }
     
     // Use borial basic (zxbc.py) from /home/ide/zxbasic
-    $zxbcPath = '/home/ide/zxbasic/zxbc.py';
+    $zxbcDir = '/home/ide/zxbasic';
+    $zxbcPath = $zxbcDir . '/zxbc.py';
     
     // Check if Python is available
     $pythonPath = '/usr/bin/python3';
@@ -71,11 +72,13 @@ function tokenizeBasic($basic, $sessionID) {
         }
     }
     
-    // Run zxbc.py: python3 zxbc.py -o output.tap input.bas -f tap --BASIC --autorun
+    // Run zxbc.py from its directory so imports work correctly
+    // Change to zxbasic directory and run: python3 zxbc.py -o output.tap input.bas -f tap --BASIC --autorun
+    // Use absolute paths for input/output files since we're changing directory
     $cmd = sprintf(
-        '%s %s -o %s %s -f tap --BASIC --autorun 2>&1',
+        'cd %s && %s zxbc.py -o %s %s -f tap --BASIC --autorun 2>&1',
+        escapeshellarg($zxbcDir),
         escapeshellarg($pythonPath),
-        escapeshellarg($zxbcPath),
         escapeshellarg($tempTap),
         escapeshellarg($tempBas)
     );
