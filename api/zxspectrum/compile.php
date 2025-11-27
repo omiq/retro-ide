@@ -60,14 +60,59 @@ function compileC($source, $sessionID) {
     }
     
     // Find zcc executable (z88dk compiler)
-    $zccPath = '/snap/bin/zcc';
-    if (!file_exists($zccPath)) {
-        // Try alternative locations
-        $zccPath = '/usr/bin/zcc';
-        if (!file_exists($zccPath)) {
-            // Try in PATH
-            $zccPath = 'zcc';
+    // Snaps can't run directly from systemd services (PHP-FPM) due to cgroup restrictions
+    // Try to find the actual binary inside the snap directory structure
+    $zccPath = null;
+    
+    // Method 1: Try to find the actual binary in snap directory
+    // Snaps are installed in /snap/[package]/current/ or /snap/[package]/[revision]/
+    $snapDirs = [
+        '/snap/z88dk/current/bin/zcc',
+        '/snap/z88dk/current/usr/bin/zcc',
+        '/snap/z88dk/current/bin/zcc',
+    ];
+    
+    // Check common snap revision directories
+    if (is_dir('/snap/z88dk')) {
+        $revisions = scandir('/snap/z88dk');
+        foreach ($revisions as $rev) {
+            if ($rev !== '.' && $rev !== '..' && is_numeric($rev)) {
+                $snapDirs[] = "/snap/z88dk/$rev/bin/zcc";
+                $snapDirs[] = "/snap/z88dk/$rev/usr/bin/zcc";
+            }
         }
+    }
+    
+    foreach ($snapDirs as $path) {
+        if (file_exists($path) && is_executable($path)) {
+            $zccPath = $path;
+            break;
+        }
+    }
+    
+    // Method 2: Try snap run (may work in some configurations)
+    if (!$zccPath && file_exists('/usr/bin/snap')) {
+        // Check if z88dk snap is installed
+        exec('/usr/bin/snap list z88dk 2>&1', $snapListOutput, $snapListCode);
+        if ($snapListCode === 0) {
+            // Try snap run - but this may still fail with cgroup error
+            $zccPath = '/usr/bin/snap run z88dk.zcc';
+        }
+    }
+    
+    // Fallback: try direct snap binary path (likely to fail with cgroup error)
+    if (!$zccPath && file_exists('/snap/bin/zcc')) {
+        $zccPath = '/snap/bin/zcc';
+    }
+    
+    // Fallback: try system installation
+    if (!$zccPath && file_exists('/usr/bin/zcc')) {
+        $zccPath = '/usr/bin/zcc';
+    }
+    
+    // Final fallback: try in PATH
+    if (!$zccPath) {
+        $zccPath = 'zcc';
     }
     
     // Run zcc: zcc +zx -startup=1 -clib=sdcc_iy -O3 -create-app -o output input.c
