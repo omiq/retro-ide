@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZX Spectrum Emulator (Iframe)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            overflow: hidden;
+        }
+        
+        #qaop-container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+        
+        #qaop-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background-color: #000;
+        }
+        
+        #status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            color: #fff;
+            z-index: 1000;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div id="status">Loading ZX Spectrum emulator...</div>
+    <div id="qaop-container">
+        <iframe id="qaop-iframe" allow="fullscreen"></iframe>
+    </div>
+
+    <script>
+        // Get URL parameters from parent page
+        const urlParams = new URLSearchParams(window.location.search);
+        const modelParam = urlParams.get('model') || '48k';
+        const loadParam = urlParams.get('load');
+        
+        // Build qaop URL with parameters
+        let qaopUrl = './qaop/qaop.html';
+        const hashParams = [];
+        
+        // Set model (48k or 128k)
+        if (modelParam === '128k') {
+            hashParams.push('128');
+        } else {
+            hashParams.push('~128'); // 48k mode
+        }
+        
+        // Add load parameter if provided
+        if (loadParam) {
+            hashParams.push('l=' + encodeURIComponent(loadParam));
+        }
+        
+        if (hashParams.length > 0) {
+            qaopUrl += '#' + hashParams.join('&');
+        }
+        
+        // Set up load event listener BEFORE setting src
+        const qaopIframe = document.getElementById('qaop-iframe');
+        let iframeLoaded = false;
+        
+        // Notify parent when iframe is ready
+        qaopIframe.addEventListener('load', function() {
+            console.log('ZX Spectrum iframe: qaop iframe loaded');
+            iframeLoaded = true;
+            updateStatus('ZX Spectrum emulator ready');
+            
+            // Hide status after a delay
+            setTimeout(() => {
+                const statusEl = document.getElementById('status');
+                if (statusEl) {
+                    statusEl.style.display = 'none';
+                }
+            }, 2000);
+            
+            // Notify parent window
+            if (window.parent) {
+                window.parent.postMessage({
+                    type: 'emulator_ready',
+                    platform: 'zxspectrum'
+                }, '*');
+            }
+        });
+        
+        // Handle errors
+        qaopIframe.addEventListener('error', function(e) {
+            console.error('ZX Spectrum iframe: Error loading qaop:', e);
+            updateStatus('Error loading emulator - check console');
+        });
+        
+        // Now set the iframe source
+        qaopIframe.src = qaopUrl;
+        
+        // Update status
+        function updateStatus(message) {
+            const statusEl = document.getElementById('status');
+            if (statusEl) {
+                statusEl.textContent = message;
+                statusEl.style.display = 'block'; // Make sure it's visible
+                // Only hide status after "ready" message, not for loading messages
+                if (message.includes('ready') || message.includes('loaded')) {
+                    setTimeout(() => {
+                        statusEl.style.display = 'none';
+                    }, 2000);
+                }
+            }
+        }
+        
+        // Listen for messages from parent window
+        window.addEventListener('message', function(event) {
+            // Accept messages from any origin (in production, you might want to check event.origin)
+            const data = event.data;
+            
+            if (!data || !data.cmd) return;
+            
+            const qaopFrame = document.getElementById('qaop-iframe');
+            if (!qaopFrame) return;
+            
+            switch (data.cmd) {
+                case 'load':
+                    // Load a file into qaop using URL hash parameter
+                    if (data.url) {
+                        const currentUrl = qaopFrame.src.split('#')[0];
+                        // Build hash with just the load URL first (without model parameter)
+                        // The model parameter might interfere with loading
+                        const loadUrl = currentUrl + '#l=' + encodeURIComponent(data.url);
+                        console.log('ZX Spectrum iframe: Loading URL (truncated):', loadUrl.substring(0, 200) + '...');
+                        console.log('ZX Spectrum iframe: Content type from data:', data.contentType);
+                        
+                        // First, load with just the file URL
+                        qaopFrame.src = loadUrl;
+                        updateStatus('Loading program...');
+                        
+                        // Listen for errors
+                        const errorHandler = function(e) {
+                            console.error('ZX Spectrum iframe: Error loading file:', e);
+                            updateStatus('Error loading program');
+                        };
+                        qaopFrame.addEventListener('error', errorHandler);
+                        
+                        // Set a timeout to clear status if load takes too long
+                        let statusTimeout = setTimeout(() => {
+                            console.log('ZX Spectrum iframe: Load timeout, assuming loaded');
+                            qaopFrame.removeEventListener('error', errorHandler);
+                            updateStatus('Program loaded');
+                            setTimeout(() => {
+                                const statusEl = document.getElementById('status');
+                                if (statusEl) {
+                                    statusEl.style.display = 'none';
+                                }
+                            }, 2000);
+                        }, 3000);
+                        
+                        // Wait for iframe to load
+                        qaopFrame.addEventListener('load', function onLoad() {
+                            qaopFrame.removeEventListener('load', onLoad);
+                            qaopFrame.removeEventListener('error', errorHandler);
+                            console.log('ZX Spectrum iframe: qaop iframe loaded with file URL');
+                            clearTimeout(statusTimeout);
+                            
+                            // Give qaop time to process the file
+                            setTimeout(() => {
+                                // Check if it's a Z80 snapshot (should auto-execute)
+                                if (data.contentType === 'application/x.zx.z80') {
+                                    console.log('ZX Spectrum iframe: Z80 snapshot loaded, should auto-execute');
+                                    updateStatus('Program loaded and executing');
+                                    // Hide status after a delay
+                                    setTimeout(() => {
+                                        const statusEl = document.getElementById('status');
+                                        if (statusEl) {
+                                            statusEl.style.display = 'none';
+                                        }
+                                    }, 2000);
+                                } else {
+                                    updateStatus('Program loaded');
+                                    setTimeout(() => {
+                                        const statusEl = document.getElementById('status');
+                                        if (statusEl) {
+                                            statusEl.style.display = 'none';
+                                        }
+                                    }, 2000);
+                                }
+                            }, 1000);
+                            
+                            // After file loads, add model parameter if needed
+                            // But only if it's different from default
+                            if (modelParam === '128k') {
+                                setTimeout(() => {
+                                    const modelUrl = currentUrl + '#l=' + encodeURIComponent(data.url) + '&128';
+                                    console.log('ZX Spectrum iframe: Adding 128k model parameter');
+                                    qaopFrame.src = modelUrl;
+                                }, 500);
+                            }
+                            
+                            // For CODE blocks (C programs), we need to execute with RANDOMIZE USR 32768
+                            // Check if this is a CODE block by checking if it's a TAP file from a C file
+                            const isCodeBlock = data.contentType === 'application/x.zx.tap' && 
+                                               data.url && data.url.includes('data:application/x.zx.tap') &&
+                                               (data.filename && (data.filename.endsWith('.c') || data.filename.endsWith('.C')));
+                            
+                            if (isCodeBlock) {
+                                console.log('ZX Spectrum iframe: CODE block detected, attempting to execute with RANDOMIZE USR 32768');
+                                updateStatus('Program loaded - executing...');
+                                
+                                // Wait for the program to finish loading, then send execution command
+                                setTimeout(() => {
+                                    try {
+                                        const qaopWindow = qaopFrame.contentWindow;
+                                        if (qaopWindow) {
+                                            // Try to send keyboard input via postMessage
+                                            // qaop might accept keyboard events via postMessage
+                                            const command = 'RANDOMIZE USR 32768\r';
+                                            console.log('ZX Spectrum iframe: Sending execution command:', command);
+                                            
+                                            // Try multiple methods to send keyboard input
+                                            // Method 1: postMessage with keyboard event
+                                            qaopWindow.postMessage({ 
+                                                type: 'keyboard', 
+                                                command: command,
+                                                keys: command
+                                            }, '*');
+                                            
+                                            // Method 2: Try to access qaop's global object if available
+                                            try {
+                                                if (qaopWindow.qaop && typeof qaopWindow.qaop.type === 'function') {
+                                                    qaopWindow.qaop.type(command);
+                                                    console.log('ZX Spectrum iframe: Used qaop.type() to send command');
+                                                }
+                                            } catch (e) {
+                                                console.log('ZX Spectrum iframe: qaop.type() not available:', e);
+                                            }
+                                            
+                                            // Method 3: Try to find and call a keyboard function
+                                            try {
+                                                const qaopGlobal = qaopWindow.qaop || qaopWindow;
+                                                const keyboardFuncs = Object.keys(qaopGlobal).filter(k => 
+                                                    k.toLowerCase().includes('key') || 
+                                                    k.toLowerCase().includes('type') ||
+                                                    k.toLowerCase().includes('input')
+                                                );
+                                                console.log('ZX Spectrum iframe: Found potential keyboard functions:', keyboardFuncs);
+                                                
+                                                for (const funcName of keyboardFuncs) {
+                                                    if (typeof qaopGlobal[funcName] === 'function') {
+                                                        try {
+                                                            qaopGlobal[funcName](command);
+                                                            console.log('ZX Spectrum iframe: Called', funcName, 'to send command');
+                                                            break;
+                                                        } catch (e) {
+                                                            // Try next function
+                                                        }
+                                                    }
+                                                }
+                                            } catch (e) {
+                                                console.log('ZX Spectrum iframe: Could not find keyboard function:', e);
+                                            }
+                                            
+                                            updateStatus('Program loaded - execution command sent');
+                                        }
+                                    } catch (e) {
+                                        console.error('ZX Spectrum iframe: Error sending execution command:', e);
+                                        updateStatus('Program loaded - manual execution may be needed (RANDOMIZE USR 32768)');
+                                    }
+                                }, 2000); // Wait 2 seconds for program to load
+                            } else {
+                                updateStatus('Program loaded');
+                            }
+                        }, { once: true });
+                    }
+                    break;
+                    
+                case 'reset':
+                    // Reset emulator by reloading without the load parameter
+                    // This prevents "Failed to fetch" errors from trying to reload data URLs
+                    const resetUrl = qaopFrame.src.split('#')[0];
+                    const currentHash = qaopFrame.src.split('#')[1] || '';
+                    // Remove the load parameter (l=...) but keep model parameter
+                    const hashParts = currentHash.split('&').filter(part => !part.startsWith('l='));
+                    const resetHash = hashParts.length > 0 ? hashParts.join('&') : '';
+                    qaopFrame.src = resetUrl + (resetHash ? '#' + resetHash : '');
+                    updateStatus('Resetting...');
+                    break;
+                    
+                case 'pause':
+                    // Pause/resume - qaop uses F9 or Pause key, we'll reload with pause parameter
+                    // Actually, qaop handles pause via keyboard, so we'll just notify
+                    updateStatus(data.pause !== false ? 'Paused (press Pause key)' : 'Resumed');
+                    break;
+                    
+                case 'model':
+                    // Switch between 48k and 128k
+                    const model = data.model || '48k';
+                    const modelUrl = qaopFrame.src.split('#')[0];
+                    const modelHashParts = [];
+                    if (model === '128k') {
+                        modelHashParts.push('128');
+                    } else {
+                        modelHashParts.push('~128');
+                    }
+                    // Preserve load parameter if present
+                    const modelCurrentHash = qaopFrame.src.split('#')[1];
+                    if (modelCurrentHash && modelCurrentHash.includes('l=')) {
+                        modelHashParts.push(modelCurrentHash.match(/l=[^&]*/)[0]);
+                    }
+                    qaopFrame.src = modelUrl + '#' + modelHashParts.join('&');
+                    updateStatus('Switching to ' + model + ' mode...');
+                    break;
+            }
+        });
+        
+        // Listen for messages from qaop iframe (for capabilities, etc.)
+        window.addEventListener('message', function(event) {
+            // Forward relevant messages to parent
+            const qaopIframe = document.getElementById('qaop-iframe');
+            if (qaopIframe && event.source === qaopIframe.contentWindow) {
+                const data = event.data;
+                if (data && (data.type === 'emulator_capabilities' || data.type === 'ready')) {
+                    // Forward to parent window
+                    if (window.parent) {
+                        window.parent.postMessage({
+                            type: 'emulator_capabilities',
+                            capabilities: {
+                                reset: true,
+                                pause: true,
+                                model: true
+                            }
+                        }, '*');
+                    }
+                }
+            }
+        });
+        
+        // Also check if iframe fails to load after timeout
+        setTimeout(() => {
+            if (!iframeLoaded) {
+                const statusEl = document.getElementById('status');
+                if (statusEl && statusEl.textContent.includes('Loading')) {
+                    console.warn('ZX Spectrum iframe: qaop iframe may have failed to load');
+                    updateStatus('Emulator loading timeout - check if qaop/qaop.html exists');
+                }
+            }
+        }, 10000);
+    </script>
+</body>
+</html>
+
