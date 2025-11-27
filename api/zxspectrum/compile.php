@@ -76,8 +76,24 @@ function compileC($source, $sessionID) {
     // -clib=sdcc_iy = use SDCC library with IY register
     // -O3 = optimize level 3
     // -create-app = create a TAP file directly
+    
+    // Set environment variables for snap to work with www-data user
+    // SNAP_USER_DATA tells snap where to store user data
+    $env = [
+        'SNAP_USER_DATA' => '/tmp/snap-www-data',
+        'HOME' => '/tmp/snap-www-data',
+        'PATH' => '/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+    ];
+    
+    // Build environment string for exec
+    $envString = '';
+    foreach ($env as $key => $value) {
+        $envString .= sprintf('%s=%s ', $key, escapeshellarg($value));
+    }
+    
     $cmd = sprintf(
-        '%s +zx -startup=1 -clib=sdcc_iy -O3 -create-app -o %s %s 2>&1',
+        '%s%s +zx -startup=1 -clib=sdcc_iy -O3 -create-app -o %s %s 2>&1',
+        $envString,
         escapeshellarg($zccPath),
         escapeshellarg($tempOut),
         escapeshellarg($tempC)
