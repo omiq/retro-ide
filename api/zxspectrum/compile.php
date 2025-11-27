@@ -66,12 +66,17 @@ function compileC($source, $sessionID) {
     
     // Method 1: Try to find the actual binary in snap directory
     // Snaps are installed in /snap/[package]/current/ or /snap/[package]/[revision]/
-    $snapDirs = [
-        '/snap/z88dk/current',
-    ];
+    // The 'current' symlink points to the active revision
+    $snapDirs = [];
     
     // Check common snap revision directories
     if (is_dir('/snap/z88dk')) {
+        // First check if 'current' symlink exists and is valid
+        if (is_link('/snap/z88dk/current') || is_dir('/snap/z88dk/current')) {
+            $snapDirs[] = '/snap/z88dk/current';
+        }
+        
+        // Also check all revision directories
         $revisions = scandir('/snap/z88dk');
         foreach ($revisions as $rev) {
             if ($rev !== '.' && $rev !== '..' && is_numeric($rev)) {
@@ -96,13 +101,16 @@ function compileC($source, $sessionID) {
     }
     
     // Method 2: Try snap run (may work in some configurations)
+    // Note: This may fail with cgroup error, but if it works, it handles config automatically
     if (!$zccPath && file_exists('/usr/bin/snap')) {
         // Check if z88dk snap is installed
         exec('/usr/bin/snap list z88dk 2>&1', $snapListOutput, $snapListCode);
         if ($snapListCode === 0) {
             // Try snap run - but this may still fail with cgroup error
+            // However, if it works, snap handles all the environment setup
             $zccPath = '/usr/bin/snap run z88dk.zcc';
             // For snap run, we don't need to set ZCCCFG as snap handles it
+            $zccBaseDir = null; // Clear base dir so we don't set ZCCCFG
         }
     }
     
@@ -138,15 +146,94 @@ function compileC($source, $sessionID) {
     ];
     
     // If we found the snap base directory, set ZCCCFG to point to the config directory
+    // z88dk looks for config in lib/config relative to the base directory
     if ($zccBaseDir) {
+        // Search for config directory - try multiple possible locations
+        // Based on actual snap installation, config is at: /snap/z88dk/[revision]/share/z88dk/lib/config
         $configDirs = [
+            "$zccBaseDir/share/z88dk/lib/config",  // Most common location in snap
             "$zccBaseDir/lib/config",
             "$zccBaseDir/usr/lib/z88dk/lib/config",
             "$zccBaseDir/lib/z88dk/lib/config",
+            "$zccBaseDir/usr/share/z88dk/lib/config",
+            "$zccBaseDir/etc/z88dk/lib/config",
         ];
+        
+        // Also search recursively for zx.cfg file
+        $foundConfigDir = null;
+        
+        // First, check the common locations
         foreach ($configDirs as $configDir) {
             if (is_dir($configDir)) {
-                $env['ZCCCFG'] = $configDir;
+                // Check if zx.cfg exists in this directory
+                if (file_exists("$configDir/zx.cfg") || file_exists("$configDir/zx.cfg.in") || 
+                    file_exists("$configDir/zx.cfg.in.in")) {
+                    $foundConfigDir = $configDir;
+                    break;
+                }
+            }
+        }
+        
+        // If not found, try to find it by searching for zx.cfg
+        if (!$foundConfigDir) {
+            $searchDirs = [
+                "$zccBaseDir/lib",
+                "$zccBaseDir/usr/lib",
+                "$zccBaseDir/share",
+                "$zccBaseDir/usr/share",
+            ];
+            
+            foreach ($searchDirs as $searchDir) {
+                if (is_dir($searchDir)) {
+                    // Use find command to locate zx.cfg
+                    $findCmd = "find " . escapeshellarg($searchDir) . " -name 'zx.cfg*' -type f 2>/dev/null | head -1";
+                    exec($findCmd, $findOutput, $findCode);
+                    if ($findCode === 0 && !empty($findOutput[0])) {
+                        $foundConfigDir = dirname($findOutput[0]);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // If we found a config directory, use it
+        if ($foundConfigDir) {
+            $env['ZCCCFG'] = $foundConfigDir;
+        } else {
+            // Fallback: try the most common location
+            // If it doesn't exist, try to create it or find where snap actually stores config
+            $defaultConfigDir = "$zccBaseDir/lib/config";
+            
+            // Check if the parent lib directory exists
+            $libDir = dirname($defaultConfigDir);
+            if (is_dir($libDir)) {
+                // Try to create config directory if it doesn't exist
+                if (!is_dir($defaultConfigDir)) {
+                    @mkdir($defaultConfigDir, 0755, true);
+                }
+                $env['ZCCCFG'] = $defaultConfigDir;
+            } else {
+                // Last resort: try to find any config directory in the snap
+                $findCmd = "find " . escapeshellarg($zccBaseDir) . " -type d -name 'config' 2>/dev/null | head -1";
+                exec($findCmd, $findOutput, $findCode);
+                if ($findCode === 0 && !empty($findOutput[0])) {
+                    $env['ZCCCFG'] = $findOutput[0];
+                } else {
+                    // Use default even if it might not exist
+                    $env['ZCCCFG'] = $defaultConfigDir;
+                }
+            }
+        }
+        
+        // Also set Z80_OZFILES and other z88dk environment variables if needed
+        $libDirs = [
+            "$zccBaseDir/lib",
+            "$zccBaseDir/usr/lib/z88dk/lib",
+            "$zccBaseDir/lib/z88dk/lib",
+        ];
+        foreach ($libDirs as $libDir) {
+            if (is_dir($libDir)) {
+                $env['Z80_OZFILES'] = $libDir;
                 break;
             }
         }
