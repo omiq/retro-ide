@@ -59,17 +59,15 @@ function compileC($source, $sessionID) {
         return ['errors' => [['line' => 0, 'msg' => "Failed to write temporary file: {$tempC}", 'path' => '']]];
     }
     
-    // Find zcc executable (z88dk compiler)
-    // Snaps can't run directly from systemd services (PHP-FPM) due to cgroup restrictions
-    // Try to find the actual binary inside the snap directory structure
+    // Find zcc executable (z88dk compiler) and its base directory
+    // We need to find both the binary and set ZCCCFG to point to the config directory
     $zccPath = null;
+    $zccBaseDir = null;
     
     // Method 1: Try to find the actual binary in snap directory
     // Snaps are installed in /snap/[package]/current/ or /snap/[package]/[revision]/
     $snapDirs = [
-        '/snap/z88dk/current/bin/zcc',
-        '/snap/z88dk/current/usr/bin/zcc',
-        '/snap/z88dk/current/bin/zcc',
+        '/snap/z88dk/current',
     ];
     
     // Check common snap revision directories
@@ -77,16 +75,23 @@ function compileC($source, $sessionID) {
         $revisions = scandir('/snap/z88dk');
         foreach ($revisions as $rev) {
             if ($rev !== '.' && $rev !== '..' && is_numeric($rev)) {
-                $snapDirs[] = "/snap/z88dk/$rev/bin/zcc";
-                $snapDirs[] = "/snap/z88dk/$rev/usr/bin/zcc";
+                $snapDirs[] = "/snap/z88dk/$rev";
             }
         }
     }
     
-    foreach ($snapDirs as $path) {
-        if (file_exists($path) && is_executable($path)) {
-            $zccPath = $path;
-            break;
+    // Find the binary and base directory
+    foreach ($snapDirs as $baseDir) {
+        $possiblePaths = [
+            "$baseDir/bin/zcc",
+            "$baseDir/usr/bin/zcc",
+        ];
+        foreach ($possiblePaths as $path) {
+            if (file_exists($path) && is_executable($path)) {
+                $zccPath = $path;
+                $zccBaseDir = $baseDir;
+                break 2; // Break out of both loops
+            }
         }
     }
     
@@ -97,6 +102,7 @@ function compileC($source, $sessionID) {
         if ($snapListCode === 0) {
             // Try snap run - but this may still fail with cgroup error
             $zccPath = '/usr/bin/snap run z88dk.zcc';
+            // For snap run, we don't need to set ZCCCFG as snap handles it
         }
     }
     
@@ -124,11 +130,27 @@ function compileC($source, $sessionID) {
     
     // Set environment variables for snap to work with www-data user
     // SNAP_USER_DATA tells snap where to store user data
+    // ZCCCFG tells z88dk where to find its configuration files
     $env = [
         'SNAP_USER_DATA' => '/tmp/snap-www-data',
         'HOME' => '/tmp/snap-www-data',
         'PATH' => '/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
     ];
+    
+    // If we found the snap base directory, set ZCCCFG to point to the config directory
+    if ($zccBaseDir) {
+        $configDirs = [
+            "$zccBaseDir/lib/config",
+            "$zccBaseDir/usr/lib/z88dk/lib/config",
+            "$zccBaseDir/lib/z88dk/lib/config",
+        ];
+        foreach ($configDirs as $configDir) {
+            if (is_dir($configDir)) {
+                $env['ZCCCFG'] = $configDir;
+                break;
+            }
+        }
+    }
     
     // Build environment string for exec
     $envString = '';
@@ -136,7 +158,13 @@ function compileC($source, $sessionID) {
         $envString .= sprintf('%s=%s ', $key, escapeshellarg($value));
     }
     
-    $cmd = sprintf(
+    // Change to the snap directory if we found it, so relative paths work
+    $cmd = '';
+    if ($zccBaseDir) {
+        $cmd = sprintf('cd %s && ', escapeshellarg($zccBaseDir));
+    }
+    
+    $cmd .= sprintf(
         '%s%s +zx -startup=1 -clib=sdcc_iy -O3 -create-app -o %s %s 2>&1',
         $envString,
         escapeshellarg($zccPath),
