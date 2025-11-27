@@ -303,6 +303,10 @@ function populateExtraFiles(step, fs, extrafiles) {
             if (basePlatform === 'msx-shell') {
                 basePlatform = 'msx';
             }
+            // Special case: zxspectrum uses zx runtime files
+            if (basePlatform === 'zxspectrum') {
+                basePlatform = 'zx';
+            }
             var xpath = "lib/" + basePlatform + "/" + xfn;
             var xhr = new XMLHttpRequest();
             xhr.responseType = 'arraybuffer';

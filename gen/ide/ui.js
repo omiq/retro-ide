@@ -1073,8 +1073,8 @@ function setupBreakpoint(btnid) {
         setDebugButtonState(btnid, "active");
 }
 function _pause() {
-    // Don't pause VIC-20 - it handles its own pause/resume in the iframe
-    if (exports.platform_id === 'vic20') {
+    // Don't pause VIC-20 or ZX Spectrum - they handle their own pause/resume in the iframe
+    if (exports.platform_id === 'vic20' || exports.platform_id === 'zxspectrum') {
         return;
     }
     if (exports.platform && exports.platform.isRunning()) {

@@ -2757,6 +2757,18 @@
           wiz_sys_type: "z80",
           wiz_inc_dir: "msx"
         },
+        "zxspectrum": {
+          arch: "z80",
+          rom_start: 16384,
+          code_start: 32768,
+          rom_size: 16384,
+          data_start: 32768,
+          data_size: 16384,
+          stack_end: 65280,
+          extra_link_args: ["crt0-zx.rel"],
+          extra_link_files: ["crt0-zx.rel", "crt0-zx.lst"],
+          wiz_sys_type: "z80"
+        },
         "sms-sg1000-libcv": {
           arch: "z80",
           rom_start: 0,
@@ -3121,6 +3133,9 @@
         var basePlatform = getBasePlatform(step.platform);
         if (basePlatform === "msx-shell") {
           basePlatform = "msx";
+        }
+        if (basePlatform === "zxspectrum") {
+          basePlatform = "zx";
         }
         var xpath = "lib/" + basePlatform + "/" + xfn;
         var xhr = new XMLHttpRequest();
@@ -5806,6 +5821,14 @@ double fmod(double x, double y);
         FS.writeFile("crt0.rel", FS.readFile("/share/lib/coleco/crt0.rel", { encoding: "utf8" }));
         FS.writeFile("crt0.lst", "\n");
       }
+      if (step.platform === "zxspectrum") {
+        if (FS.analyzePath("/share/lib/zx/crt0-zx.rel").exists) {
+          FS.writeFile("crt0-zx.rel", FS.readFile("/share/lib/zx/crt0-zx.rel", { encoding: "utf8" }));
+        }
+        if (FS.analyzePath("/share/lib/zx/crt0-zx.lst").exists) {
+          FS.writeFile("crt0-zx.lst", FS.readFile("/share/lib/zx/crt0-zx.lst", { encoding: "utf8" }));
+        }
+      }
       var args = [
         "-mjwxyu",
         "-i",
@@ -5832,7 +5855,8 @@ double fmod(double x, double y);
       putWorkFile("main.noi", noiout);
       if (!anyTargetChanged(step, ["main.ihx", "main.noi"]))
         return;
-      var binout = parseIHX(hexout, params.rom_start !== void 0 ? params.rom_start : params.code_start, params.rom_size, errors);
+      var base_addr = params.code_start;
+      var binout = parseIHX(hexout, base_addr, params.rom_size, errors);
       if (errors.length) {
         return { errors };
       }
@@ -17018,8 +17042,79 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
     }
   });
 
-  // src/worker/tools/kickass.ts
+  // src/worker/tools/zxbasic.ts
   function generateSessionID() {
+    return "zxbasic_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
+  }
+  async function compileZXBasic(step) {
+    const outputPath = step.prefix + ".tap";
+    gatherFiles(step);
+    if (staleFiles(step, [outputPath])) {
+      try {
+        const source = getWorkFileAsString(step.path) || "";
+        const sessionID2 = generateSessionID();
+        const cmd = {
+          basic: source,
+          sessionID: sessionID2
+        };
+        console.log("ZX Spectrum tokenize API: POST", { sessionID: sessionID2, sourceLength: source.length });
+        let result = await fetch(ZXSPECTRUM_TOKENIZE_API_URL, {
+          method: "POST",
+          mode: "cors",
+          body: JSON.stringify(cmd),
+          headers: {
+            "Content-Type": "application/json"
+          }
+        });
+        if (!result.ok) {
+          return {
+            errors: [{
+              line: 0,
+              msg: `HTTP ${result.status}: ${result.statusText}`,
+              path: step.path
+            }]
+          };
+        }
+        let json = await result.json();
+        if (isUnchanged(json)) {
+          return json;
+        }
+        if (isErrorResult(json)) {
+          return json;
+        }
+        if (isOutputResult(json)) {
+          if (typeof json.output === "string") {
+            json.output = stringToByteArray(atob(json.output));
+          }
+          putWorkFile(outputPath, json.output);
+          return json;
+        }
+        throw new Error(`Unexpected result from tokenize API: ${JSON.stringify(json)}`);
+      } catch (error) {
+        console.error("ZX Spectrum tokenize API error:", error);
+        return {
+          errors: [{
+            line: 0,
+            msg: `Tokenize API error: ${error}`,
+            path: step.path
+          }]
+        };
+      }
+    }
+    return { unchanged: true };
+  }
+  var ZXSPECTRUM_TOKENIZE_API_URL;
+  var init_zxbasic = __esm({
+    "src/worker/tools/zxbasic.ts"() {
+      init_util();
+      init_workertypes();
+      init_builder();
+      ZXSPECTRUM_TOKENIZE_API_URL = "https://ide.retrogamecoders.com/api/zxspectrum/tokenize.php";
+    }
+  });
+
+  // src/worker/tools/kickass.ts
+  function generateSessionID2() {
     return "kickass_" + Date.now() + "_" + Math.random().toString(36).substring(2, 15);
   }
   async function compileKickAss(step) {
@@ -17047,7 +17142,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
         }
         updates.push({ path, data });
       }
-      const sessionID2 = generateSessionID();
+      const sessionID2 = generateSessionID2();
       const cmd = {
         buildStep: {
           path: step.path,
@@ -17138,6 +17233,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
       init_c64basic();
       init_bbcbasic();
       init_applesoftbasic();
+      init_zxbasic();
       init_kickass();
       TOOLS = {
         "dasm": assembleDASM,
@@ -17178,6 +17274,7 @@ ${this.scopeSymbol(name)} = ${name}::__Start`;
         "c64basic": compileC64Basic,
         "bbcbasic": compileBbcBasic,
         "applesoftbasic": compileAppleSoftBasic,
+        "zxbasic": compileZXBasic,
         "kickass": compileKickAss,
         "none": async (step) => {
           const { getWorkFileAsString: getWorkFileAsString3 } = await Promise.resolve().then(() => (init_builder(), builder_exports));

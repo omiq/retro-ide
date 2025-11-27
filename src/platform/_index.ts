@@ -71,6 +71,7 @@ export function importPlatform(name: string) : Promise<any> {
         return import("../platform/x86dosbox");
       case "zmachine": return import("../platform/zmachine");
       case "zx": return import("../platform/zx");
+      case "zxspectrum": return import("../platform/zxspectrum");
       case 'bbc':
       case 'bbc-micro':
       case 'bbc.b':

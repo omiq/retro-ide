@@ -139,6 +139,15 @@ function linkSDLDZ80(step) {
             FS.writeFile('crt0.rel', FS.readFile('/share/lib/coleco/crt0.rel', { encoding: 'utf8' }));
             FS.writeFile('crt0.lst', '\n'); // TODO: needed so -u flag works
         }
+        // Ensure crt0-zx files are in current directory for zxspectrum
+        if (step.platform === 'zxspectrum') {
+            if (FS.analyzePath('/share/lib/zx/crt0-zx.rel').exists) {
+                FS.writeFile('crt0-zx.rel', FS.readFile('/share/lib/zx/crt0-zx.rel', { encoding: 'utf8' }));
+            }
+            if (FS.analyzePath('/share/lib/zx/crt0-zx.lst').exists) {
+                FS.writeFile('crt0-zx.lst', FS.readFile('/share/lib/zx/crt0-zx.lst', { encoding: 'utf8' }));
+            }
+        }
         var args = ['-mjwxyu',
             '-i', 'main.ihx', // TODO: main?
             '-b', '_CODE=0x' + params.code_start.toString(16),
@@ -161,7 +170,10 @@ function linkSDLDZ80(step) {
         if (!(0, builder_1.anyTargetChanged)(step, ["main.ihx", "main.noi"]))
             return;
         // parse binary file
-        var binout = parseIHX(hexout, params.rom_start !== undefined ? params.rom_start : params.code_start, params.rom_size, errors);
+        // For zxspectrum, code_start is 0x8000 but we want to create a binary starting at 0x8000
+        // So we use code_start as the base address, not rom_start
+        var base_addr = params.code_start;
+        var binout = parseIHX(hexout, base_addr, params.rom_size, errors);
         if (errors.length) {
             return { errors: errors };
         }

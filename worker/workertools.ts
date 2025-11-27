@@ -18,6 +18,7 @@ import * as oscar64 from './tools/oscar64'
 import * as c64basic from './tools/c64basic'
 import * as bbcbasic from './tools/bbcbasic'
 import * as applesoftbasic from './tools/applesoftbasic'
+import * as zxbasic from './tools/zxbasic'
 import * as kickass from './tools/kickass'
 import { PLATFORM_PARAMS } from "./platforms";
 
@@ -63,6 +64,7 @@ export const TOOLS = {
   'c64basic': c64basic.compileC64Basic,
   'bbcbasic': bbcbasic.compileBbcBasic,
   'applesoftbasic': applesoftbasic.compileAppleSoftBasic,
+  'zxbasic': zxbasic.compileZXBasic,
   'kickass': kickass.compileKickAss,
   'none': async (step: any) => {
     // No-op tool for platforms that handle compilation themselves

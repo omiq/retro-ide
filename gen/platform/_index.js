@@ -96,6 +96,7 @@ function importPlatform(name) {
             return Promise.resolve().then(() => __importStar(require("../platform/x86dosbox")));
         case "zmachine": return Promise.resolve().then(() => __importStar(require("../platform/zmachine")));
         case "zx": return Promise.resolve().then(() => __importStar(require("../platform/zx")));
+        case "zxspectrum": return Promise.resolve().then(() => __importStar(require("../platform/zxspectrum")));
         case 'bbc':
         case 'bbc-micro':
         case 'bbc.b':
