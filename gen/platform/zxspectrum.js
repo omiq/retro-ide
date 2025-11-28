@@ -4,18 +4,19 @@ exports.ZXSpectrumPlatform = void 0;
 const baseplatform_1 = require("../common/baseplatform");
 const emu_1 = require("../common/emu");
 const ZXSPECTRUM_PRESETS = [
-    { id: 'hello.bas', name: 'Hello World (BASIC)', category: 'BASIC' },
-    { id: 'chars.bas', name: 'Character Set (BASIC)' },
-    { id: 'colours.bas', name: 'Colours (BASIC)' },
-    { id: 'measles.bas', name: 'Measles (BASIC)' },
-    { id: 'circle.bas', name: 'Circle (BASIC)' },
-    { id: 'clock2.bas', name: 'Clock (BASIC)' },
-    { id: 'flag.bas', name: 'Flag (BASIC)' },
-    { id: 'inputexample.bas', name: 'Input Example (BASIC)' },
-    { id: 'led.bas', name: 'LED (BASIC)' },
-    { id: 'mandel.bas', name: 'Mandel (BASIC)' },
-    { id: 'pong.bas', name: 'Pong (BASIC)' },
-    { id: 'scroll.bas', name: 'Scroll (BASIC)' },
+    { id: 'hello.bas', name: 'Hello World', category: 'ZXBASIC' },
+    { id: 'chars.bas', name: 'Character Set' },
+    { id: 'colours.bas', name: 'Colours' },
+    { id: 'measles.bas', name: 'Measles' },
+    { id: 'circle.bas', name: 'Circle' },
+    { id: 'clock2.bas', name: 'Clock' },
+    { id: 'flag.bas', name: 'Flag' },
+    { id: 'inputexample.bas', name: 'Input Example' },
+    { id: 'led.bas', name: 'LED' },
+    { id: 'mandel.bas', name: 'Mandel' },
+    { id: 'pong.bas', name: 'Pong' },
+    { id: 'scroll.bas', name: 'Scroll' },
+    { id: 'asmfunctions.bas', name: 'ASM Functions' },
     { id: 'hello.c', name: 'Hello World (C)', category: 'C' },
 ];
 class ZXSpectrumPlatform {
